@@ -148,13 +148,16 @@ async function cmdImportCtx(): Promise<void> {
 }
 
 async function cmdStatus(): Promise<void> {
-  const config = vscode.workspace.getConfiguration("sqz");
-  const sessionId: string = config.get("sessionId") ?? "default";
-  const status = bridge!.getBudgetStatus(sessionId);
-  const pct = Math.round(status.percentUsed);
-
+  const stats = bridge!.getStats();
+  if (stats.totalCompressions === 0) {
+    vscode.window.showInformationMessage(
+      "sqz: no compressions recorded yet. Run some commands in Claude Code and check back."
+    );
+    return;
+  }
+  const pct = Math.round(stats.avgReduction);
   vscode.window.showInformationMessage(
-    `sqz budget: ${pct}% used — ${status.consumed.toLocaleString()} / ${status.windowSize.toLocaleString()} tokens (${status.available.toLocaleString()} available)`
+    `sqz: ${stats.totalCompressions} compressions, ${stats.tokensSaved.toLocaleString()} tokens saved (${pct}% avg), ${stats.cacheEntries} cache entries`
   );
 }
 

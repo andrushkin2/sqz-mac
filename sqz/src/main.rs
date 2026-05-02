@@ -155,7 +155,11 @@ enum Command {
     },
 
     /// Show current token budget and usage.
-    Status,
+    Status {
+        /// Output as JSON (for programmatic consumption by VS Code extension, etc.)
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Show cost summary for a session.
     Cost {
@@ -215,6 +219,10 @@ enum Command {
         /// Use "--project list" to see all tracked projects.
         #[arg(long, short)]
         project: Option<String>,
+
+        /// Output as JSON (for programmatic consumption by VS Code extension, etc.)
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show accumulated token savings over time.
@@ -307,14 +315,14 @@ fn main() {
         Some(Command::Expand { prefix }) => cmd_expand(&prefix),
         Some(Command::Export { session_id }) => cmd_export(&session_id),
         Some(Command::Import { file }) => cmd_import(&file),
-        Some(Command::Status) => cmd_status(),
+        Some(Command::Status { json }) => cmd_status(json),
         Some(Command::Cost { session_id }) => cmd_cost(&session_id),
         Some(Command::Analyze { file, high, low }) => cmd_analyze(file, high, low),
         Some(Command::Tee { action }) => cmd_tee(action),
         Some(Command::Dashboard { port }) => cmd_dashboard(port),
         Some(Command::Proxy { port }) => cmd_proxy(port),
         Some(Command::Uninstall { yes }) => cmd_uninstall(yes),
-        Some(Command::Stats { session_id, project }) => cmd_stats(session_id, project),
+        Some(Command::Stats { session_id, project, json }) => cmd_stats(session_id, project, json),
         Some(Command::Gain { days, project }) => cmd_gain(days, project),
         Some(Command::Discover { days }) => cmd_discover(days),
         Some(Command::Resume { session_id }) => cmd_resume(session_id),
@@ -869,9 +877,31 @@ fn cmd_import(file: &str) {
 }
 
 /// `sqz status` — show current budget/usage.
-fn cmd_status() {
+fn cmd_status(json: bool) {
     let engine = require_engine();
     let report = engine.usage_report("default");
+
+    // Also pull cumulative stats from the session store so the JSON
+    // output includes historical savings — this is what the VS Code
+    // extension status bar needs.
+    let cs = engine.session_store().compression_stats().unwrap_or_default();
+
+    if json {
+        let obj = serde_json::json!({
+            "consumed": report.consumed,
+            "windowSize": report.allocated,
+            "percentUsed": report.consumed_pct * 100.0,
+            "available": report.available,
+            "totalCompressions": cs.total_compressions,
+            "tokensIn": cs.total_tokens_in,
+            "tokensOut": cs.total_tokens_out,
+            "tokensSaved": cs.tokens_saved(),
+            "avgReduction": cs.reduction_pct(),
+        });
+        println!("{}", serde_json::to_string(&obj).unwrap());
+        return;
+    }
+
     println!("agent:     {}", report.agent_id);
     println!("consumed:  {} tokens ({:.1}%)", report.consumed, report.consumed_pct * 100.0);
     println!("pinned:    {} tokens", report.pinned);
@@ -1488,8 +1518,34 @@ fn resolve_project_filter(raw: &str) -> String {
 }
 
 /// `sqz stats [session-id]` — full compression stats report.
-fn cmd_stats(session_id: Option<String>, project: Option<String>) {
+fn cmd_stats(session_id: Option<String>, project: Option<String>, json: bool) {
     let engine = require_engine();
+
+    // JSON output: emit machine-readable stats and exit.
+    if json {
+        let project_dir = project.as_deref().map(resolve_project_filter);
+        let cs = if let Some(ref dir) = project_dir {
+            engine.session_store().compression_stats_for_project(dir).unwrap_or_default()
+        } else {
+            engine.session_store().compression_stats().unwrap_or_default()
+        };
+        let cache_entries = engine.session_store()
+            .list_cache_entries_lru()
+            .unwrap_or_default();
+        let cache_size: u64 = cache_entries.iter().map(|(_, sz)| sz).sum();
+
+        let obj = serde_json::json!({
+            "totalCompressions": cs.total_compressions,
+            "tokensIn": cs.total_tokens_in,
+            "tokensOut": cs.total_tokens_out,
+            "tokensSaved": cs.tokens_saved(),
+            "avgReduction": cs.reduction_pct(),
+            "cacheEntries": cache_entries.len(),
+            "cacheSize": cache_size,
+        });
+        println!("{}", serde_json::to_string(&obj).unwrap());
+        return;
+    }
 
     // Handle --project list
     if project.as_deref() == Some("list") {

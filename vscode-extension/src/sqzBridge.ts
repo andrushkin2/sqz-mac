@@ -208,6 +208,10 @@ export class SqzBridge {
 
   /**
    * Get the current budget status for a session.
+   * Reads cumulative stats from ~/.sqz/sessions.db via `sqz stats --json`
+   * so the status bar reflects real historical savings, not a per-process
+   * budget counter that resets on every engine instantiation.
+   *
    * Requirement 6.4: display token budget usage in status bar.
    */
   getBudgetStatus(sessionId = "default"): BudgetStatus {
@@ -216,18 +220,46 @@ export class SqzBridge {
     }
 
     try {
-      const output = this.exec(["status", "--session", sessionId, "--json"]);
-      const data = JSON.parse(output) as Partial<BudgetStatus>;
-      const consumed = data.consumed ?? 0;
-      const windowSize = data.windowSize ?? 200_000;
+      const output = this.exec(["stats", "--json"]);
+      const data = JSON.parse(output) as Record<string, number>;
+      const tokensSaved = data.tokensSaved ?? 0;
+      const tokensIn = data.tokensIn ?? 0;
+      const windowSize = 200_000;
       return {
-        consumed,
+        consumed: tokensIn,
         windowSize,
-        percentUsed: windowSize > 0 ? (consumed / windowSize) * 100 : 0,
-        available: windowSize - consumed,
+        percentUsed: windowSize > 0 ? (tokensIn / windowSize) * 100 : 0,
+        available: windowSize - tokensIn,
       };
     } catch {
       return { consumed: 0, windowSize: 200_000, percentUsed: 0, available: 200_000 };
+    }
+  }
+
+  /**
+   * Get cumulative compression stats from ~/.sqz/sessions.db.
+   * This is the source of truth for historical savings — same data
+   * that `sqz stats` displays in the terminal.
+   */
+  getStats(): import("./statusBar").SqzStats {
+    if (!this.isAvailable()) {
+      return { totalCompressions: 0, tokensIn: 0, tokensOut: 0, tokensSaved: 0, avgReduction: 0, cacheEntries: 0, cacheSize: 0 };
+    }
+
+    try {
+      const output = this.exec(["stats", "--json"]);
+      const data = JSON.parse(output);
+      return {
+        totalCompressions: data.totalCompressions ?? 0,
+        tokensIn: data.tokensIn ?? 0,
+        tokensOut: data.tokensOut ?? 0,
+        tokensSaved: data.tokensSaved ?? 0,
+        avgReduction: data.avgReduction ?? 0,
+        cacheEntries: data.cacheEntries ?? 0,
+        cacheSize: data.cacheSize ?? 0,
+      };
+    } catch {
+      return { totalCompressions: 0, tokensIn: 0, tokensOut: 0, tokensSaved: 0, avgReduction: 0, cacheEntries: 0, cacheSize: 0 };
     }
   }
 
