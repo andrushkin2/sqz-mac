@@ -1,6 +1,7 @@
 mod cli_proxy;
 mod shell_hook;
 mod tests;
+mod vizit;
 
 use clap::{Parser, Subcommand};
 use sqz_engine::SqzEngine;
@@ -273,6 +274,26 @@ enum Command {
     ///   sqz print-opencode-plugin > ~/.config/opencode/plugins/sqz.ts
     #[command(name = "print-opencode-plugin")]
     PrintOpencodePlugin,
+
+    /// Launch a live terminal dashboard for AI agent sessions.
+    ///
+    /// Displays a real-time, auto-refreshing table of all active agent
+    /// sessions tracked by sqz — like htop but for AI agents.
+    /// Press q or Ctrl-C to exit.
+    Vizit {
+        /// Refresh interval in seconds (default: 2).
+        #[arg(long, default_value_t = 2)]
+        refresh: u64,
+
+        /// Path to the sessions database.
+        /// Defaults to ~/.sqz/sessions.db.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+
+        /// Disable ANSI color output regardless of terminal capabilities.
+        #[arg(long)]
+        no_color: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -329,6 +350,7 @@ fn main() {
         Some(Command::Hook { tool }) => cmd_hook(&tool),
         Some(Command::Compact) => cmd_compact(),
         Some(Command::PrintOpencodePlugin) => cmd_print_opencode_plugin(),
+        Some(Command::Vizit { refresh, db, no_color }) => cmd_vizit(refresh, db, no_color),
     }
 }
 
@@ -1954,6 +1976,47 @@ fn cmd_print_opencode_plugin() {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "sqz".to_string());
     print!("{}", sqz_engine::generate_opencode_plugin(&sqz_path));
+}
+
+/// `sqz vizit` — live terminal dashboard for AI agent sessions.
+fn cmd_vizit(refresh_secs: u64, db_path: Option<std::path::PathBuf>, no_color: bool) {
+    use crate::vizit::{EventLoop, VizitConfig};
+
+    // If --no-color is passed, set NO_COLOR env var before any rendering.
+    if no_color {
+        std::env::set_var("NO_COLOR", "1");
+    }
+
+    // Validate refresh_secs range
+    if refresh_secs < 1 || refresh_secs > 60 {
+        eprintln!("[sqz vizit] --refresh must be between 1 and 60, got {refresh_secs}");
+        std::process::exit(1);
+    }
+
+    // Resolve db_path: use provided path or default to ~/.sqz/sessions.db
+    let db_path = db_path.unwrap_or_else(default_vizit_db_path);
+
+    let config = VizitConfig {
+        refresh_secs,
+        db_path,
+    };
+
+    match EventLoop::new(config).and_then(|el| el.run()) {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!("[sqz vizit] error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Resolve the default path to the sessions database: `~/.sqz/sessions.db`.
+fn default_vizit_db_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    home.join(".sqz").join("sessions.db")
 }
 
 // ── Hook command ──────────────────────────────────────────────────────────

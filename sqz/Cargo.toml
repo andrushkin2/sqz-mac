@@ -21,6 +21,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+chrono = { workspace = true }
+libc = "0.2"
+rusqlite = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
