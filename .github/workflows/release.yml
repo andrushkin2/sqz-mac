@@ -182,6 +182,40 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
 
+  # ── Publish to npm ───────────────────────────────────────────────────────
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Sync npm package version to tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd npm
+          # Update package.json version to match the git tag
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "Publishing sqz-cli@${VERSION} to npm"
+
+      - name: Publish
+        run: npm publish --access public
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   # ── Update Homebrew formula with real checksums ───────────────────────────
   update-homebrew:
     name: Update Homebrew checksums

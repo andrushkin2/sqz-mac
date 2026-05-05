@@ -1,20 +1,35 @@
 #!/usr/bin/env node
-// Thin wrapper — delegates to the downloaded sqz-mcp binary
-// Requirement 16.2: npx sqz-mcp
+// Thin wrapper — delegates to the downloaded sqz-mcp binary.
+// This file is the npm bin entry point; the real binary is downloaded
+// by install.js (postinstall) into the same directory as this file.
 
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
 const { spawnSync } = require("child_process");
 
 const ext = process.platform === "win32" ? ".exe" : "";
 const binary = path.join(__dirname, `sqz-mcp${ext}`);
 
+if (!fs.existsSync(binary)) {
+  console.error(
+    `sqz-mcp binary not found at ${binary}.\n` +
+    `The postinstall step may have failed. Try:\n` +
+    `  npm install -g sqz-cli --force\n` +
+    `Or install manually:\n` +
+    `  cargo install sqz-mcp`
+  );
+  process.exit(1);
+}
+
 const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
 
 if (result.error) {
   if (result.error.code === "ENOENT") {
-    console.error("sqz-mcp binary not found. Try reinstalling: npm install -g sqz-cli");
+    console.error(
+      `sqz-mcp binary not found. Try reinstalling: npm install -g sqz-cli --force`
+    );
   } else {
     console.error("Failed to run sqz-mcp:", result.error.message);
   }
