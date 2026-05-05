@@ -122,6 +122,14 @@ irm https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.ps1 | iex
 npm install -g sqz-cli
 ```
 
+**Build from source via Cargo:**
+
+```sh
+cargo install sqz-cli sqz-mcp
+```
+
+`sqz-cli` provides the `sqz` binary; `sqz-mcp` provides the MCP server. `sqz-engine` is a library dependency — it compiles automatically and does not need to be installed separately.
+
 **Build from source** (`cargo install sqz-cli`) works too, but needs a C toolchain:
 
 - Linux: `build-essential` (apt) or equivalent
