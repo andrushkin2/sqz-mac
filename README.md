@@ -35,6 +35,7 @@
   <a href="https://addons.mozilla.org/en-US/firefox/addon/sqz-context-compression/"><img src="https://img.shields.io/badge/Firefox-Add--on-ff7139?logo=firefox-browser&logoColor=white" alt="Firefox"></a>
   <a href="https://plugins.jetbrains.com/plugin/31240-sqz--context-intelligence/"><img src="https://img.shields.io/badge/JetBrains-Plugin-000000?logo=jetbrains&logoColor=white" alt="JetBrains"></a>
   <a href="https://discord.gg/j8EEyH5dSB"><img src="https://img.shields.io/discord/1493251029075235076?logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord"></a>
+  <a href="https://github.com/ojuschugh1/homebrew-sqz"><img src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" alt="Homebrew"></a>
 </p>
 
 <p align="center">
@@ -124,6 +125,10 @@ irm https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.ps1 | iex
 
 # Any platform via npm
 npm install -g sqz-cli
+
+# macOS / Linux via Homebrew
+brew tap ojuschugh1/sqz
+brew install sqz
 ```
 
 **Build from source via Cargo:**
