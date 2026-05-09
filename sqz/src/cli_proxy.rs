@@ -311,12 +311,28 @@ impl CliProxy {
     }
 
     /// Internal: run `output` through the engine pipeline.
+    /// Uses adaptive compression: escalates to aggressive mode when
+    /// session token pressure is high (research-backed: ACC-RAG, ACON).
     fn compress_output(
         &self,
         _cmd: &str,
         output: &str,
     ) -> sqz_engine::Result<CompressedContent> {
-        self.engine.compress(output)
+        // Adaptive pressure: check how many tokens have been injected
+        // in the last 30 minutes. If above threshold, compress harder.
+        let pressure = self.engine.session_store()
+            .session_pressure(30)
+            .unwrap_or(0);
+
+        // Thresholds based on typical 200k context windows:
+        // >80k tokens in 30min = high pressure → aggressive mode
+        // >120k tokens in 30min = critical → aggressive mode
+        if pressure > 80_000 {
+            eprintln!("[sqz] adaptive: high session pressure ({} tokens/30min), escalating compression", pressure);
+            self.engine.compress_with_mode(output, sqz_engine::CompressionMode::Aggressive)
+        } else {
+            self.engine.compress(output)
+        }
     }
 
     // ── Cross-command context references ──────────────────────────────────

@@ -221,6 +221,10 @@ enum Command {
         #[arg(long, short)]
         project: Option<String>,
 
+        /// Show per-command token usage breakdown (top consumers).
+        #[arg(long, short)]
+        breakdown: bool,
+
         /// Output as JSON (for programmatic consumption by VS Code extension, etc.)
         #[arg(long)]
         json: bool,
@@ -343,7 +347,7 @@ fn main() {
         Some(Command::Dashboard { port }) => cmd_dashboard(port),
         Some(Command::Proxy { port }) => cmd_proxy(port),
         Some(Command::Uninstall { yes }) => cmd_uninstall(yes),
-        Some(Command::Stats { session_id, project, json }) => cmd_stats(session_id, project, json),
+        Some(Command::Stats { session_id, project, breakdown, json }) => cmd_stats(session_id, project, breakdown, json),
         Some(Command::Gain { days, project }) => cmd_gain(days, project),
         Some(Command::Discover { days }) => cmd_discover(days),
         Some(Command::Resume { session_id }) => cmd_resume(session_id),
@@ -1540,7 +1544,7 @@ fn resolve_project_filter(raw: &str) -> String {
 }
 
 /// `sqz stats [session-id]` — full compression stats report.
-fn cmd_stats(session_id: Option<String>, project: Option<String>, json: bool) {
+fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: bool, json: bool) {
     let engine = require_engine();
 
     // JSON output: emit machine-readable stats and exit.
@@ -1669,6 +1673,38 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, json: bool) {
     }
 
     println!("{bot}");
+
+    // Per-command breakdown
+    if breakdown {
+        let cmds = if let Some(ref dir) = project_dir {
+            engine.session_store().command_breakdown_for_project(15, dir).unwrap_or_default()
+        } else {
+            engine.session_store().command_breakdown(15).unwrap_or_default()
+        };
+
+        if !cmds.is_empty() {
+            println!();
+            println!("  Top token consumers:");
+            println!("  {}", "─".repeat(70));
+            println!(
+                "  {:<16} {:>6} {:>10} {:>10} {:>8}",
+                "command", "calls", "tokens in", "tokens out", "saved"
+            );
+            println!("  {}", "─".repeat(70));
+            for c in &cmds {
+                println!(
+                    "  {:<16} {:>6} {:>10} {:>10} {:>7.0}%",
+                    c.command,
+                    c.invocations,
+                    c.tokens_in,
+                    c.tokens_out,
+                    c.reduction_pct(),
+                );
+            }
+            println!("  {}", "─".repeat(70));
+        }
+    }
+
     println!();
 }
 

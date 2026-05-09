@@ -784,6 +784,85 @@ impl SessionStore {
         Ok(projects)
     }
 
+    /// Per-command breakdown of token usage. Returns top N commands by
+    /// total tokens consumed, with compression stats for each.
+    /// Used by `sqz stats --breakdown` to show where tokens are going.
+    pub fn command_breakdown(&self, limit: u32) -> Result<Vec<CommandStats>> {
+        let mut stmt = self.db.prepare(
+            "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
+             FROM compression_log \
+             GROUP BY mode \
+             ORDER BY SUM(tokens_original) DESC \
+             LIMIT ?1",
+        ).map_err(SqzError::SessionStore)?;
+
+        let rows = stmt.query_map(params![limit], |row| {
+            let tokens_in: u64 = row.get(2)?;
+            let tokens_out: u64 = row.get(3)?;
+            Ok(CommandStats {
+                command: row.get(0)?,
+                invocations: row.get(1)?,
+                tokens_in,
+                tokens_out,
+                tokens_saved: tokens_in.saturating_sub(tokens_out),
+            })
+        }).map_err(SqzError::SessionStore)?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(SqzError::SessionStore)?);
+        }
+        Ok(results)
+    }
+
+    /// Per-command breakdown filtered to a specific project.
+    pub fn command_breakdown_for_project(&self, limit: u32, project_dir: &str) -> Result<Vec<CommandStats>> {
+        let mut stmt = self.db.prepare(
+            "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
+             FROM compression_log \
+             WHERE project_dir = ?1 \
+             GROUP BY mode \
+             ORDER BY SUM(tokens_original) DESC \
+             LIMIT ?2",
+        ).map_err(SqzError::SessionStore)?;
+
+        let rows = stmt.query_map(params![project_dir, limit], |row| {
+            let tokens_in: u64 = row.get(2)?;
+            let tokens_out: u64 = row.get(3)?;
+            Ok(CommandStats {
+                command: row.get(0)?,
+                invocations: row.get(1)?,
+                tokens_in,
+                tokens_out,
+                tokens_saved: tokens_in.saturating_sub(tokens_out),
+            })
+        }).map_err(SqzError::SessionStore)?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(SqzError::SessionStore)?);
+        }
+        Ok(results)
+    }
+
+    /// Get the total tokens injected in the current session (since last
+    /// compaction or start). Used by the adaptive pressure system to
+    /// decide whether to escalate compression intensity.
+    pub fn session_pressure(&self, since_minutes: u32) -> Result<u64> {
+        let mut stmt = self.db.prepare(
+            "SELECT COALESCE(SUM(tokens_compressed), 0) \
+             FROM compression_log \
+             WHERE created_at >= datetime('now', ?1)",
+        ).map_err(SqzError::SessionStore)?;
+
+        let offset = format!("-{since_minutes} minutes");
+        let total: u64 = stmt.query_row(params![offset], |row| {
+            row.get(0)
+        }).map_err(SqzError::SessionStore)?;
+
+        Ok(total)
+    }
+
     // ── Known files (persistent cross-command context tracking) ───────────
 
     /// Record a file path as "known" (its content is in the dedup cache).
@@ -851,6 +930,26 @@ pub struct DailyGain {
     pub compressions: u32,
     pub tokens_saved: u64,
     pub tokens_in: u64,
+}
+
+/// Per-command token usage breakdown.
+#[derive(Debug, Clone)]
+pub struct CommandStats {
+    pub command: String,
+    pub invocations: u32,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    pub tokens_saved: u64,
+}
+
+impl CommandStats {
+    pub fn reduction_pct(&self) -> f64 {
+        if self.tokens_in == 0 {
+            0.0
+        } else {
+            (1.0 - self.tokens_out as f64 / self.tokens_in as f64) * 100.0
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
