@@ -2207,6 +2207,7 @@ fn cmd_hook(tool: &str) {
         "cursor" => sqz_engine::process_hook_cursor(&input),
         "gemini" => sqz_engine::process_hook_gemini(&input),
         "windsurf" => sqz_engine::process_hook_windsurf(&input),
+        "kiro" => sqz_engine::process_hook_kiro(&input),
         // "claude" and any other tool use the default Claude Code format
         _ => sqz_engine::process_hook(&input),
     };

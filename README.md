@@ -173,8 +173,8 @@ sqz init --skip cursor,windsurf       # everything except Cursor and Windsurf
 ```
 
 Accepted names: `claude`, `cursor`, `windsurf`, `cline`, `gemini`,
-`opencode`, `codex`. Aliases (`claude-code`, `gemini-cli`, `roo`) also
-work. `--only` and `--skip` can't be combined.
+`kiro`, `opencode`, `codex`. Aliases (`claude-code`, `gemini-cli`, `roo`,
+`kiro-cli`) also work. `--only` and `--skip` can't be combined.
 
 ### Manual installation (preserve comments in your config)
 
@@ -244,6 +244,7 @@ What doesn't get compressed:
 | Windsurf | PreToolUse hook (transparent) | `sqz init` |
 | Cline | PreToolUse hook (transparent) | `sqz init` |
 | Gemini CLI | BeforeTool hook (transparent) | `sqz init` |
+| Kiro | PreToolUse hook (transparent) | `sqz init` |
 | OpenCode | TypeScript plugin (transparent) | `sqz init` |
 | VS Code | [Extension](https://marketplace.visualstudio.com/items?itemName=ojuschugh1.sqz) | Install from Marketplace |
 | JetBrains | [Plugin](https://plugins.jetbrains.com/plugin/31240-sqz--context-intelligence/) | Install from Marketplace |

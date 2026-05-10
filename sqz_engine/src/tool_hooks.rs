@@ -60,6 +60,8 @@ pub enum HookPlatform {
     GeminiCli,
     /// Windsurf: exit-code based (no JSON rewriting support confirmed)
     Windsurf,
+    /// Kiro: STDOUT with rewritten tool_input JSON, exit 0 = allow
+    Kiro,
 }
 
 /// Process a PreToolUse hook invocation from an AI tool.
@@ -107,6 +109,19 @@ pub fn process_hook_windsurf(input: &str) -> Result<String> {
     process_hook_for_platform(input, HookPlatform::Windsurf)
 }
 
+/// Process a hook invocation for Kiro (IDE and CLI).
+///
+/// Kiro's PreToolUse hook receives JSON on STDIN with `tool_name` and
+/// `tool_input`. The hook outputs the modified tool_input JSON to STDOUT.
+/// Exit code 0 = allow (proceed with modified input).
+/// Exit code 2 = block.
+///
+/// Kiro uses `execute_bash` (alias `shell`) as the tool name for shell
+/// commands, with `tool_input.command` containing the command string.
+pub fn process_hook_kiro(input: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::Kiro)
+}
+
 /// Platform-aware hook processing. Extracts the command from the tool-specific
 /// input format, rewrites it, and returns the response in the correct format
 /// for the target platform.
@@ -138,8 +153,8 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
     // output by rewriting the command via PreToolUse. The MCP server
     // (sqz-mcp) provides compressed alternatives to these built-in tools.
     let is_shell = matches!(tool_name, "Bash" | "bash" | "Shell" | "shell" | "terminal"
-        | "run_terminal_command" | "run_shell_command")
-        || matches!(hook_event, "beforeShellExecution" | "pre_run_command");
+        | "run_terminal_command" | "run_shell_command" | "execute_bash")
+        || matches!(hook_event, "beforeShellExecution" | "pre_run_command" | "preToolUse");
 
     if !is_shell {
         // Pass through non-bash tools unchanged.
@@ -299,6 +314,16 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
                     "updatedInput": {
                         "command": rewritten
                     }
+                }
+            })
+        }
+        HookPlatform::Kiro => {
+            // Kiro CLI/IDE: output the modified tool_input as JSON to STDOUT.
+            // Exit code 0 means "allow with modifications".
+            // The hook runner merges this back into the tool call.
+            serde_json::json!({
+                "tool_input": {
+                    "command": rewritten
                 }
             })
         }
@@ -549,6 +574,28 @@ not on PATH, run commands normally.
             ),
             scope: HookScope::Project,
         },
+        // Kiro (IDE and CLI) — uses .kiro/hooks/ directory with JSON hook files.
+        // The hook intercepts shell tool calls and pipes output through sqz.
+        ToolHookConfig {
+            tool_name: "Kiro".to_string(),
+            config_path: PathBuf::from(".kiro/hooks/sqz-compress.json"),
+            config_content: format!(
+                r#"{{
+  "name": "sqz compress",
+  "version": "1.0.0",
+  "description": "Compress shell command output through sqz for token savings",
+  "when": {{
+    "type": "preToolUse",
+    "toolTypes": ["shell"]
+  }},
+  "then": {{
+    "type": "runCommand",
+    "command": "{sqz_path} hook kiro"
+  }}
+}}"#
+            ),
+            scope: HookScope::Project,
+        },
         // OpenCode — TypeScript plugin at ~/.config/opencode/plugins/sqz.ts
         // plus a config file in project root (opencode.json or
         // opencode.jsonc). Unlike other tools, OpenCode uses a TS
@@ -714,6 +761,7 @@ pub const SUPPORTED_TOOL_NAMES: &[&str] = &[
     "Windsurf",
     "Cline",
     "Gemini CLI",
+    "Kiro",
     "OpenCode",
     "Codex",
 ];
@@ -752,6 +800,7 @@ pub fn canonicalize_tool_name(name: &str) -> String {
         // .clinerules file).
         "cline" | "roo" | "roocode" => "cline".to_string(),
         "gemini" | "geminicli" => "gemini".to_string(),
+        "kiro" | "kirocli" | "kiroide" => "kiro".to_string(),
         "opencode" => "opencode".to_string(),
         "codex" => "codex".to_string(),
         other => other.to_string(),
