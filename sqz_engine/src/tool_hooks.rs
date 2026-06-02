@@ -1157,9 +1157,9 @@ fn install_claude_global_at(sqz_path: &str, home_override: Option<&Path>) -> Res
         ))
     })?;
 
-    upsert_sqz_hook_entry(hooks_obj, "PreToolUse", pre_tool_use, "sqz hook claude");
-    upsert_sqz_hook_entry(hooks_obj, "PreCompact", pre_compact, "sqz hook precompact");
-    upsert_sqz_hook_entry(hooks_obj, "SessionStart", session_start, "sqz resume");
+    upsert_sqz_hook_entry(hooks_obj, "PreToolUse", pre_tool_use, "hook claude");
+    upsert_sqz_hook_entry(hooks_obj, "PreCompact", pre_compact, "hook precompact");
+    upsert_sqz_hook_entry(hooks_obj, "SessionStart", session_start, "resume");
 
     let after = serde_json::to_string(&root_obj).unwrap_or_default();
     if before == after && path.exists() {
@@ -1263,9 +1263,9 @@ fn remove_claude_global_hook_at(
     let mut changed = false;
     if let Some(hooks) = root_obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
         for (event, sentinel) in &[
-            ("PreToolUse", "sqz hook claude"),
-            ("PreCompact", "sqz hook precompact"),
-            ("SessionStart", "sqz resume"),
+            ("PreToolUse", "hook claude"),
+            ("PreCompact", "hook precompact"),
+            ("SessionStart", "resume"),
         ] {
             if let Some(arr) = hooks.get_mut(*event).and_then(|v| v.as_array_mut()) {
                 let before = arr.len();
@@ -2039,6 +2039,35 @@ mod global_install_tests {
                 arr.len(),
                 1,
                 "{event} must have exactly one sqz entry after 2 installs, got {arr:?}"
+            );
+        }
+    }
+
+    /// Regression for issue #21: on Windows, `sqz_path` contains `.exe`
+    /// so the stored command is `C:\...\sqz.exe hook claude`. The old
+    /// sentinel was `"sqz hook claude"` which is NOT a substring of
+    /// `"sqz.exe hook claude"` — causing every re-run to append a
+    /// duplicate instead of replacing. The fix uses `"hook claude"` as
+    /// the sentinel which matches regardless of `.exe`.
+    #[test]
+    fn global_install_is_idempotent_with_exe_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe_path = r"C:\Users\user\.cargo\bin\sqz.exe";
+        assert!(install_claude_global_at(exe_path, Some(tmp.path())).unwrap());
+        assert!(
+            !install_claude_global_at(exe_path, Some(tmp.path())).unwrap(),
+            "second install with .exe path should report no change (issue #21)"
+        );
+
+        let path = tmp.path().join(".claude").join("settings.json");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for event in &["PreToolUse", "PreCompact", "SessionStart"] {
+            let arr = parsed["hooks"][event].as_array().unwrap();
+            assert_eq!(
+                arr.len(),
+                1,
+                "{event} must have exactly one entry after 2 installs with .exe path, got {arr:?}"
             );
         }
     }
