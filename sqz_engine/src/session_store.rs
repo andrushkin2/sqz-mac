@@ -899,6 +899,64 @@ impl SessionStore {
             .map_err(SqzError::SessionStore)?;
         Ok(())
     }
+
+    /// Clear the dedup cache. After this, all future reads will be treated
+    /// as cache misses and compressed fresh. Does NOT clear compression
+    /// stats or session history.
+    pub fn clear_cache(&self) -> Result<u64> {
+        let count: u64 = self.db.query_row(
+            "SELECT COUNT(*) FROM cache_entries", [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        self.db.execute("DELETE FROM cache_entries", [])
+            .map_err(SqzError::SessionStore)?;
+        // Also clear the compaction marker so freshness checks don't
+        // reference timestamps from the deleted entries.
+        let _ = self.db.execute(
+            "DELETE FROM metadata WHERE key = 'last_compaction_at'", [],
+        );
+        Ok(count)
+    }
+
+    /// Clear compression stats (the `compression_log` table). After this,
+    /// `sqz stats` and `sqz gain` will show zero until new compressions
+    /// happen.
+    pub fn clear_stats(&self) -> Result<u64> {
+        let count: u64 = self.db.query_row(
+            "SELECT COUNT(*) FROM compression_log", [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        self.db.execute("DELETE FROM compression_log", [])
+            .map_err(SqzError::SessionStore)?;
+        Ok(count)
+    }
+
+    /// Clear compression stats for a specific project directory only.
+    pub fn clear_stats_for_project(&self, project_dir: &str) -> Result<u64> {
+        let count: u64 = self.db.query_row(
+            "SELECT COUNT(*) FROM compression_log WHERE project_dir = ?1",
+            rusqlite::params![project_dir],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        self.db.execute(
+            "DELETE FROM compression_log WHERE project_dir = ?1",
+            rusqlite::params![project_dir],
+        ).map_err(SqzError::SessionStore)?;
+        Ok(count)
+    }
+
+    /// Full reset: clear cache, stats, sessions, known files, and metadata.
+    /// Equivalent to deleting sessions.db and letting sqz recreate it.
+    pub fn reset_all(&self) -> Result<()> {
+        self.db.execute("DELETE FROM cache_entries", []).map_err(SqzError::SessionStore)?;
+        self.db.execute("DELETE FROM compression_log", []).map_err(SqzError::SessionStore)?;
+        self.db.execute("DELETE FROM sessions", []).map_err(SqzError::SessionStore)?;
+        self.db.execute("DELETE FROM known_files", []).map_err(SqzError::SessionStore)?;
+        self.db.execute("DELETE FROM metadata", []).map_err(SqzError::SessionStore)?;
+        // VACUUM to reclaim disk space.
+        let _ = self.db.execute("VACUUM", []);
+        Ok(())
+    }
 }
 
 /// Cumulative compression statistics.

@@ -267,6 +267,30 @@ enum Command {
     /// Summarizes old items and outputs an eviction report.
     Compact,
 
+    /// Clear the dedup cache, compression stats, or both.
+    ///
+    /// Useful when switching models, starting fresh on a project, or if
+    /// stale `§ref:HASH§` tokens are confusing the agent.
+    Reset {
+        /// Only clear the dedup cache (keep stats and session history).
+        #[arg(long)]
+        cache_only: bool,
+
+        /// Only clear compression stats (keep the cache).
+        #[arg(long)]
+        stats_only: bool,
+
+        /// Scope the reset to a specific project directory.
+        /// Use "." for the current directory, or pass an absolute path.
+        /// Without this, resets globally.
+        #[arg(long, short)]
+        project: Option<String>,
+
+        /// Skip confirmation prompt.
+        #[arg(long, short)]
+        yes: bool,
+    },
+
     /// Print the OpenCode plugin TypeScript to stdout for manual install.
     ///
     /// Lets users install sqz into OpenCode by hand — useful when an
@@ -353,6 +377,9 @@ fn main() {
         Some(Command::Resume { session_id }) => cmd_resume(session_id),
         Some(Command::Hook { tool }) => cmd_hook(&tool),
         Some(Command::Compact) => cmd_compact(),
+        Some(Command::Reset { cache_only, stats_only, project, yes }) => {
+            cmd_reset(cache_only, stats_only, project, yes)
+        }
         Some(Command::PrintOpencodePlugin) => cmd_print_opencode_plugin(),
         Some(Command::Vizit { refresh, db, no_color }) => cmd_vizit(refresh, db, no_color),
     }
@@ -2112,6 +2139,87 @@ fn cmd_compact() {
             eprintln!("[sqz] compact error: {e}");
         }
     }
+}
+
+/// `sqz reset` — clear cache, stats, or both (issue #17).
+///
+/// Gives users control over sqz's persistent state when they want to
+/// start fresh — switching models, wiping a project, or debugging
+/// stale `§ref:HASH§` tokens that confuse the agent.
+fn cmd_reset(cache_only: bool, stats_only: bool, project: Option<String>, skip_confirm: bool) {
+    use std::io::Write;
+
+    let engine = require_engine();
+    let store = engine.session_store();
+
+    let project_dir = project.as_deref().map(resolve_project_filter);
+
+    // Determine what we're clearing
+    let (clear_cache, clear_stats) = match (cache_only, stats_only) {
+        (true, false) => (true, false),
+        (false, true) => (false, true),
+        // Default (neither flag): clear both
+        _ => (true, true),
+    };
+
+    // Show what will be cleared
+    println!("[sqz] reset plan:");
+    if clear_cache && project_dir.is_none() {
+        let count = store.list_cache_entries_lru().map(|v| v.len()).unwrap_or(0);
+        println!("  • dedup cache: {} entries will be cleared", count);
+    }
+    if clear_stats {
+        if let Some(ref dir) = project_dir {
+            println!("  • compression stats for project: {}", dir);
+        } else {
+            println!("  • compression stats: all entries will be cleared");
+        }
+    }
+    if !clear_cache && !clear_stats {
+        println!("  (nothing to clear)");
+        return;
+    }
+    println!();
+
+    // Confirm
+    if !skip_confirm {
+        print!("Continue? [Y/n] ");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            eprintln!("[sqz] could not read input, aborting.");
+            std::process::exit(1);
+        }
+        let answer = answer.trim().to_lowercase();
+        if !answer.is_empty() && answer != "y" && answer != "yes" {
+            println!("[sqz] aborted.");
+            return;
+        }
+    }
+
+    // Execute
+    if clear_cache && project_dir.is_none() {
+        match store.clear_cache() {
+            Ok(count) => println!("[sqz] ✓ cleared {} cache entries", count),
+            Err(e) => eprintln!("[sqz] ✗ cache clear failed: {e}"),
+        }
+    }
+    if clear_stats {
+        if let Some(ref dir) = project_dir {
+            match store.clear_stats_for_project(dir) {
+                Ok(count) => println!("[sqz] ✓ cleared {} stat entries for {}", count, dir),
+                Err(e) => eprintln!("[sqz] ✗ stats clear failed: {e}"),
+            }
+        } else {
+            match store.clear_stats() {
+                Ok(count) => println!("[sqz] ✓ cleared {} stat entries", count),
+                Err(e) => eprintln!("[sqz] ✗ stats clear failed: {e}"),
+            }
+        }
+    }
+
+    println!();
+    println!("[sqz] reset complete.");
 }
 
 /// `sqz print-opencode-plugin` — emit plugin TS for manual install.
