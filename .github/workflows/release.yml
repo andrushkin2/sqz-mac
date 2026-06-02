@@ -16,8 +16,10 @@
 # a top-level binary — no `archive/sqz` nesting.
 #
 # If you add another crate, also add it to the `binaries` list below
-# AND to install.sh / install.ps1 / npm/install.js / homebrew/sqz.rb —
-# the distribution surfaces are parallel and do not auto-sync.
+# AND to install.sh / install.ps1 / npm/install.js — the distribution
+# surfaces are parallel and do not auto-sync. The Homebrew formula lives
+# in the dedicated tap repo (ojuschugh1/homebrew-sqz) and is regenerated
+# via repository_dispatch from the dispatch-homebrew-tap job below.
 
 name: Release
 
@@ -216,55 +218,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ── Update Homebrew formula with real checksums ───────────────────────────
-  update-homebrew:
-    name: Update Homebrew checksums
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: main
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Compute SHA256 checksums and update formula
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          FORMULA="homebrew/sqz.rb"
-
-          for target in \
-            "aarch64-apple-darwin" \
-            "x86_64-apple-darwin" \
-            "aarch64-unknown-linux-musl" \
-            "x86_64-unknown-linux-musl"; do
-            ARCHIVE="artifacts/sqz-${VERSION}-${target}.tar.gz"
-            if [ -f "$ARCHIVE" ]; then
-              SHA=$(sha256sum "$ARCHIVE" | cut -d' ' -f1)
-              PLACEHOLDER="PLACEHOLDER_SHA256_$(echo $target | tr '[:lower:]-' '[:upper:]_')"
-              sed -i "s|${PLACEHOLDER}|${SHA}|g" "$FORMULA"
-              echo "Updated $target: $SHA"
-            fi
-          done
-
-          # Also update version in formula
-          sed -i "s|version \".*\"|version \"${VERSION#v}\"|g" "$FORMULA"
-
-      - name: Commit updated formula
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add homebrew/sqz.rb
-          git diff --staged --quiet || git commit -m "chore: Update homebrew checksums for ${GITHUB_REF_NAME}"
-          git push
-
   # ── Ping homebrew-sqz tap to trigger formula update ──────────────────────
   #
   # After the GitHub Release is published, send a repository_dispatch event
@@ -274,19 +227,52 @@ jobs:
   #
   # Requires a PAT with `repo` scope stored as HOMEBREW_TAP_TOKEN in this
   # repo's secrets. The default GITHUB_TOKEN cannot dispatch to a different
-  # repo.
+  # repo. If the secret is unset we skip gracefully so the release itself
+  # still succeeds — users can manually trigger the tap workflow until the
+  # secret is configured.
   dispatch-homebrew-tap:
     name: Ping homebrew-sqz tap
     needs: release
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch update to homebrew-sqz
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          curl -fsSL \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.HOMEBREW_TAP_TOKEN }}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ojuschugh1/homebrew-sqz/dispatches \
-            -d '{"event_type":"sqz-release","client_payload":{"version":"${{ github.ref_name }}"}}'
-          echo "Dispatched sqz-release event to homebrew-sqz for ${{ github.ref_name }}"
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set."
+            echo "::warning::Skipping homebrew tap dispatch. The tap's nightly cron"
+            echo "::warning::will pick up this release within 24 hours, OR you can"
+            echo "::warning::manually trigger the workflow at:"
+            echo "::warning::  https://github.com/ojuschugh1/homebrew-sqz/actions/workflows/update-sqz.yml"
+            exit 0
+          fi
+
+          # Use --fail-with-body so we get the actual API error message on
+          # failure (curl -fsSL would print "exit 22" with no detail).
+          response_file="$(mktemp)"
+          if curl --silent --show-error --location \
+                --fail-with-body \
+                --output "${response_file}" \
+                --write-out "%{http_code}" \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/ojuschugh1/homebrew-sqz/dispatches" \
+                -d "{\"event_type\":\"sqz-release\",\"client_payload\":{\"version\":\"${REF_NAME}\"}}" \
+                | tee "${response_file}.code"; then
+            echo ""
+            echo "✓ Dispatched sqz-release event to homebrew-sqz for ${REF_NAME}"
+          else
+            echo "::error::Homebrew tap dispatch failed."
+            echo "::error::Response body:"
+            cat "${response_file}" >&2 || true
+            echo ""
+            echo "::error::Common causes:"
+            echo "::error::  - HOMEBREW_TAP_TOKEN expired or lacks 'repo' scope"
+            echo "::error::  - Tap repo renamed or deleted"
+            echo "::error::  - Tap workflow missing repository_dispatch trigger"
+            exit 1
+          fi
