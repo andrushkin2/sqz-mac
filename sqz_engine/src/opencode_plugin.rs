@@ -84,6 +84,20 @@ const SqzPluginFactory = async (ctx: any) => {{
     return false;
   }}
 
+  // Don't rewrite commands containing shell operators. Appending
+  // `2>&1 | sqz compress` to a heredoc, compound command, existing
+  // pipe, or redirect corrupts the command. Issue #22: heredoc
+  // terminators like `EOF 2>&1 | sqz compress --cmd git` are not
+  // valid delimiters.
+  function hasShellOperators(cmd: string): boolean {{
+    if (cmd.includes("&&") || cmd.includes("||") || cmd.includes(";")) return true;
+    if (cmd.includes(">") || cmd.includes("<")) return true;
+    if (cmd.includes("|")) return true;
+    if (cmd.includes("<<")) return true;
+    if (cmd.includes("$(") || cmd.includes("`")) return true;
+    return false;
+  }}
+
   function shouldIntercept(tool: string): boolean {{
     return ["bash", "shell", "terminal", "run_shell_command"].includes(tool.toLowerCase());
   }}
@@ -143,7 +157,7 @@ const SqzPluginFactory = async (ctx: any) => {{
       if (!shouldIntercept(tool)) return;
 
       const cmd = output.args?.command ?? "";
-      if (!cmd || isAlreadyWrapped(cmd) || isInteractive(cmd)) return;
+      if (!cmd || isAlreadyWrapped(cmd) || isInteractive(cmd) || hasShellOperators(cmd)) return;
 
       // Rewrite: pipe through `sqz compress --cmd <base>`.
       //
@@ -836,6 +850,13 @@ pub fn process_opencode_hook(input: &str) -> Result<String> {
         return Ok(input.to_string());
     }
 
+    // Don't rewrite commands with shell operators — appending `2>&1 | sqz
+    // compress` to a heredoc, compound command, or existing pipe corrupts
+    // the command. Reported in issue #22: heredoc terminators get mangled.
+    if crate::tool_hooks::has_shell_operators(command) {
+        return Ok(input.to_string());
+    }
+
     // Determine the base command name. Skip leading VAR=VALUE assignments
     // so an operator-prefixed command like `FOO=bar make test` still picks
     // `make` as the base instead of `FOO=bar`.
@@ -934,6 +955,25 @@ mod tests {
         assert!(content.contains("isInteractive"));
         assert!(content.contains("vim"));
         assert!(content.contains("--watch"));
+    }
+
+    /// Issue #22: the generated plugin must contain a `hasShellOperators`
+    /// guard so heredocs, compound commands, and pipes aren't corrupted.
+    #[test]
+    fn test_generate_opencode_plugin_has_shell_operator_guard() {
+        let content = generate_opencode_plugin("sqz");
+        assert!(
+            content.contains("function hasShellOperators(cmd: string): boolean"),
+            "plugin must define hasShellOperators guard (issue #22)"
+        );
+        assert!(
+            content.contains("hasShellOperators(cmd)"),
+            "plugin hook body must call hasShellOperators (issue #22)"
+        );
+        assert!(
+            content.contains("<<"),
+            "hasShellOperators must check for heredoc operator"
+        );
     }
 
     /// Issue #10 follow-up (@itguy327 comment): OpenCode's plugin UI
@@ -1046,6 +1086,32 @@ mod tests {
         let input = r#"{"tool":"bash","args":{"command":"npm run dev --watch"}}"#;
         let result = process_opencode_hook(input).unwrap();
         assert_eq!(result, input, "watch mode should pass through");
+    }
+
+    /// Regression for issue #22: heredocs, compound commands, pipes, and
+    /// redirects must not be rewritten. Appending `2>&1 | sqz compress`
+    /// corrupts the command structure.
+    #[test]
+    fn test_process_opencode_hook_skips_shell_operators() {
+        // Heredoc (the exact case from issue #22)
+        let heredoc = r#"{"tool":"bash","args":{"command":"git commit -F- <<'EOF'\nfeat: subject\n\nbody\nEOF"}}"#;
+        let result = process_opencode_hook(heredoc).unwrap();
+        assert_eq!(result, heredoc, "heredoc must not be rewritten (issue #22)");
+
+        // Compound command
+        let compound = r#"{"tool":"bash","args":{"command":"cargo build && cargo test"}}"#;
+        let result = process_opencode_hook(compound).unwrap();
+        assert_eq!(result, compound, "compound commands must pass through");
+
+        // Existing pipe
+        let pipe = r#"{"tool":"bash","args":{"command":"cat file.txt | grep foo"}}"#;
+        let result = process_opencode_hook(pipe).unwrap();
+        assert_eq!(result, pipe, "existing pipes must pass through");
+
+        // Redirect
+        let redirect = r#"{"tool":"bash","args":{"command":"echo hello > output.txt"}}"#;
+        let result = process_opencode_hook(redirect).unwrap();
+        assert_eq!(result, redirect, "redirects must pass through");
     }
 
     #[test]
