@@ -404,7 +404,12 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
     let preset_path = preset_dir.join("default.toml");
     let sqz_path = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "sqz".to_string());
+        .unwrap_or_else(|_| "sqz".to_string())
+        // Normalize backslashes to forward slashes on Windows. Claude Code
+        // runs hook commands through Git Bash where `\` is an escape char,
+        // so `C:\Users\...\sqz.exe` → `C:Users...sqz.exe` → "not found".
+        // Forward slashes work in Git Bash, cmd.exe, and PowerShell.
+        .replace('\\', "/");
     let project_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     let scope = if global {
@@ -1233,7 +1238,8 @@ fn cmd_uninstall(skip_confirm: bool) {
     let project_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sqz_path_str = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "sqz".to_string());
+        .unwrap_or_else(|_| "sqz".to_string())
+        .replace('\\', "/"); //  normalize for Git Bash on Windows
     let tool_configs = sqz_engine::generate_hook_configs(&sqz_path_str);
     for config in &tool_configs {
         // OpenCode's config is merged in place by `install_tool_hooks`
@@ -2118,7 +2124,8 @@ fn cmd_compact() {
 fn cmd_print_opencode_plugin() {
     let sqz_path = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "sqz".to_string());
+        .unwrap_or_else(|_| "sqz".to_string())
+        .replace('\\', "/"); //  normalize for Git Bash on Windows
     print!("{}", sqz_engine::generate_opencode_plugin(&sqz_path));
 }
 
