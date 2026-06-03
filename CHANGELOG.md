@@ -5,6 +5,38 @@ All notable changes to sqz will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-06-02
+
+### Added
+
+- **`sqz reset` command** (issue #17) — clear the dedup cache, compression
+  stats, or both. Supports `--cache-only`, `--stats-only`, `--project .`
+  for scoped resets. Gives users control when switching models or starting
+  fresh on a project where stale `§ref:HASH§` tokens confuse the agent.
+
+### Fixed
+
+- **Windows: `sqz init` not idempotent** (issue #21) — re-running `sqz init
+  --global` appended duplicate hook entries instead of replacing them. Root
+  cause: the upsert sentinel was `"sqz hook claude"` which doesn't match
+  `"sqz.exe hook claude"` on Windows (`.exe` breaks the substring match).
+  Fixed by using subcommand-only sentinels (`"hook claude"`, etc.).
+- **Windows: hook command fails under Git Bash** (issue #20) — Claude Code
+  runs hooks through Git Bash where `\` is an escape character. The stored
+  path `C:\Users\...\sqz.exe` collapsed to `C:Users...sqz.exe`. Fixed by
+  normalizing all backslashes to forward slashes (`C:/Users/.../sqz.exe`)
+  which works in Git Bash, cmd.exe, and PowerShell.
+- **OpenCode: shell operators corrupt commands** (issue #22) — the OpenCode
+  plugin was missing the `hasShellOperators` guard that the Claude Code path
+  already had. Commands with heredocs, pipes, redirects, and compound
+  operators (`&&`, `||`) got `2>&1 | sqz compress` appended, breaking the
+  command structure. Fixed in both the generated TS plugin and the Rust hook
+  processor.
+- **CI: Hardened homebrew dispatch** (issue #15) — removed dead
+  `update-homebrew` job and stale `homebrew/sqz.rb`. Dispatch now skips
+  gracefully if `HOMEBREW_TAP_TOKEN` is unset and surfaces the actual API
+  error on failure.
+
 ## [1.1.1] — 2026-05-10
 
 ### Added
