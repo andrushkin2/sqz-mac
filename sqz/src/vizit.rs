@@ -104,9 +104,17 @@ pub fn is_color_enabled() -> bool {
     if std::env::var("NO_COLOR").is_ok() {
         return false;
     }
-    // SAFETY: isatty is a simple syscall with no side effects.
-    let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) } != 0;
-    is_tty
+    #[cfg(unix)]
+    {
+        // SAFETY: isatty is a simple syscall with no side effects.
+        unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 }
+    }
+    // On non-Unix platforms assume ANSI is supported (modern Windows terminals
+    // are), matching the behaviour of `color::enabled()` in main.rs.
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 // ── Terminal size ─────────────────────────────────────────────────────────────
@@ -221,6 +229,31 @@ extern "C" fn sigwinch_handler(_: libc::c_int) {
 
 #[cfg(not(unix))]
 fn register_sigwinch_handler() {}
+
+// ── Non-blocking stdin read ─────────────────────────────────────────────────
+
+/// Attempt a single non-blocking read of one byte from stdin.
+///
+/// Returns the number of bytes read (`0` if none are available). This is only
+/// reached on Unix at runtime — the interactive loop requires raw mode, which
+/// is unsupported elsewhere — but the non-Unix stub is needed so the crate
+/// compiles on Windows.
+#[cfg(unix)]
+fn read_stdin_byte(buf: &mut [u8; 1]) -> isize {
+    // SAFETY: reading at most 1 byte into a valid 1-byte buffer.
+    unsafe {
+        libc::read(
+            libc::STDIN_FILENO,
+            buf.as_mut_ptr() as *mut libc::c_void,
+            1,
+        )
+    }
+}
+
+#[cfg(not(unix))]
+fn read_stdin_byte(_buf: &mut [u8; 1]) -> isize {
+    0
+}
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -910,7 +943,13 @@ impl EventLoop {
         use std::io::Write;
         use std::time::{Duration, Instant};
 
+        // SAFETY: isatty is a simple syscall with no side effects.
+        #[cfg(unix)]
         let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) } != 0;
+        // Non-Unix: raw mode is unsupported, so treat stdout as non-TTY and
+        // fall through to the single plain-text snapshot path below.
+        #[cfg(not(unix))]
+        let is_tty = false;
 
         // Non-TTY: print a single plain-text snapshot and exit
         if !is_tty {
@@ -976,13 +1015,7 @@ impl EventLoop {
 
                 // Non-blocking stdin read
                 let mut buf = [0u8; 1];
-                let n = unsafe {
-                    libc::read(
-                        libc::STDIN_FILENO,
-                        buf.as_mut_ptr() as *mut libc::c_void,
-                        1,
-                    )
-                };
+                let n = read_stdin_byte(&mut buf);
                 if n > 0 {
                     match buf[0] {
                         b'q' | b'Q' | 0x03 => break 'outer, // q, Q, Ctrl-C
