@@ -24,6 +24,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = { workspace = true }
 libc = "0.2"
 rusqlite = { workspace = true }
+dirs-next = "2.0"
 
 [dev-dependencies]
 proptest = { workspace = true }

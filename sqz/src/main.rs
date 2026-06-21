@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use sqz_engine::SqzEngine;
 use sqz_engine::{EntropyAnalyzer, InfoLevel};
 use sqz_engine::{TeeManager, TeeMode};
-use sqz_engine::{DashboardConfig, DashboardMetrics, DashboardServer};
+use sqz_engine::{DashboardConfig, DashboardMetrics, DashboardServer, CommandBreakdown, ToolBreakdown, SessionHistoryEntry};
 
 use cli_proxy::CliProxy;
 use shell_hook::ShellHook;
@@ -1082,9 +1082,89 @@ fn cmd_tee(action: Option<TeeAction>) {
 
 /// `sqz dashboard [--port N]` — launch local web dashboard.
 fn cmd_dashboard(port: u16) {
+    use sqz_engine::SessionStore;
+
     let config = DashboardConfig { port };
     let metrics = std::sync::Arc::new(std::sync::Mutex::new(DashboardMetrics::default()));
-    let server = DashboardServer::new(config, metrics);
+    let server = DashboardServer::new(config, metrics.clone());
+    let metrics_handle = server.metrics_handle();
+
+    // Background thread: poll session store every 5s, update dashboard metrics.
+    std::thread::spawn(move || {
+        let store_path = dirs_next::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".sqz")
+            .join("sessions.db");
+        let store = SessionStore::open_or_create(&store_path).ok();
+
+        loop {
+            if let Some(ref store) = store {
+                // Top-level metrics.
+                if let Ok(stats) = store.compression_stats() {
+                    if let Ok(mut m) = metrics_handle.lock() {
+                        m.tokens_total = stats.total_tokens_in;
+                        m.tokens_saved = stats.tokens_saved();
+                        if stats.total_tokens_in > 0 {
+                            m.compression_ratio =
+                                1.0 - stats.total_tokens_out as f64 / stats.total_tokens_in as f64;
+                        }
+                    }
+                }
+                // Cache hit/miss counters.
+                if let Ok((hits, misses)) = store.cache_hit_miss_counts() {
+                    if let Ok(mut m) = metrics_handle.lock() {
+                        m.cache_hits = hits;
+                        m.cache_misses = misses;
+                    }
+                }
+                // Per-tool breakdown (from stages_applied).
+                if let Ok(tools) = store.per_tool_breakdown() {
+                    if let Ok(mut m) = metrics_handle.lock() {
+                        m.per_tool = tools
+                            .iter()
+                            .map(|(name, tin, tout, cnt)| ToolBreakdown {
+                                tool_name: name.clone(),
+                                tokens_input: *tin,
+                                tokens_output: *tout,
+                                cost_usd: 0.0,
+                                call_count: *cnt,
+                            })
+                            .collect();
+                    }
+                }
+                // Per-command breakdown (from mode column).
+                if let Ok(commands) = store.per_command_breakdown() {
+                    if let Ok(mut m) = metrics_handle.lock() {
+                        m.per_command = commands
+                            .iter()
+                            .map(|(name, tin, tout, cnt)| CommandBreakdown {
+                                command: name.clone(),
+                                tokens_original: *tin,
+                                tokens_compressed: *tout,
+                                invocations: *cnt,
+                            })
+                            .collect();
+                    }
+                }
+                // Session history.
+                if let Ok(sessions) = store.list_sessions(50) {
+                    if let Ok(mut m) = metrics_handle.lock() {
+                        m.sessions = sessions.iter().map(|s| SessionHistoryEntry::from(s)).collect();
+                        // Auto-create synthetic dashboard session when metrics > 0.
+                        if m.tokens_saved > 0
+                            && !m.sessions.iter().any(|s| s.id == "dashboard")
+                        {
+                            let _ = store.save_dashboard_session(
+                                "dashboard",
+                                "sqz dashboard session (auto-created)",
+                            );
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+    });
 
     println!("[sqz] starting dashboard on http://127.0.0.1:{port}");
     if let Err(e) = server.run() {

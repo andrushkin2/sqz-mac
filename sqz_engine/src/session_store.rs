@@ -253,6 +253,28 @@ impl SessionStore {
         Ok(session.id.clone())
     }
 
+    /// Save a lightweight session from just an id and summary for dashboard use.
+    pub fn save_dashboard_session(&self, id: &str, summary: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let project_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .to_string_lossy()
+            .to_string();
+        let empty_data = serde_json::to_vec(&serde_json::json!({"conversation":[]}))?;
+
+        self.db
+            .execute(
+                "INSERT INTO sessions (id, project_dir, compressed_summary, created_at, updated_at, data) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                 compressed_summary = excluded.compressed_summary, \
+                 updated_at = excluded.updated_at",
+                params![id, project_dir, summary, now, now, empty_data],
+            )
+            .map_err(SqzError::SessionStore)?;
+        Ok(())
+    }
+
     /// Load a session by id.
     pub fn load_session(&self, id: SessionId) -> Result<SessionState> {
         let data: Vec<u8> = self.db.query_row(
@@ -892,12 +914,61 @@ impl SessionStore {
         }
         Ok(files)
     }
-
     /// Clear all known files (e.g. on session reset).
     pub fn clear_known_files(&self) -> Result<()> {
-        self.db.execute("DELETE FROM known_files", [])
+        self.db
+            .execute("DELETE FROM known_files", [])
             .map_err(SqzError::SessionStore)?;
         Ok(())
+    }
+
+    /// Number of entries currently in the dedup cache.
+    pub fn cache_entry_count(&self) -> Result<u64> {
+        self.db.query_row(
+            "SELECT COUNT(*) FROM cache_entries", [],
+            |row| row.get(0),
+        ).map_err(SqzError::SessionStore)
+    }
+
+    /// Increment the cache-hit counter (persisted in metadata).
+    pub fn record_cache_hit(&self) -> Result<()> {
+        let count: u64 = self.db.query_row(
+            "SELECT value FROM metadata WHERE key = 'cache_hits'", [],
+            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
+        ).unwrap_or(0);
+        let new = count + 1;
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('cache_hits', ?1)",
+            params![new.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Increment the cache-miss counter (persisted in metadata).
+    pub fn record_cache_miss(&self) -> Result<()> {
+        let count: u64 = self.db.query_row(
+            "SELECT value FROM metadata WHERE key = 'cache_misses'", [],
+            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
+        ).unwrap_or(0);
+        let new = count + 1;
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('cache_misses', ?1)",
+            params![new.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Return (cache_hits, cache_misses) from metadata counters.
+    pub fn cache_hit_miss_counts(&self) -> Result<(u64, u64)> {
+        let hits: u64 = self.db.query_row(
+            "SELECT value FROM metadata WHERE key = 'cache_hits'", [],
+            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
+        ).unwrap_or(0);
+        let misses: u64 = self.db.query_row(
+            "SELECT value FROM metadata WHERE key = 'cache_misses'", [],
+            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
+        ).unwrap_or(0);
+        Ok((hits, misses))
     }
 
     /// Clear the dedup cache. After this, all future reads will be treated
@@ -956,6 +1027,115 @@ impl SessionStore {
         // VACUUM to reclaim disk space.
         let _ = self.db.execute("VACUUM", []);
         Ok(())
+    }
+
+    /// Return all sessions ordered by most recently updated, limited to `limit`.
+    pub fn list_sessions(&self, limit: u32) -> Result<Vec<SessionSummary>> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, project_dir, compressed_summary, created_at, updated_at \
+             FROM sessions ORDER BY updated_at DESC LIMIT ?1",
+            )
+            .map_err(SqzError::SessionStore)?;
+
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(SqzError::SessionStore)?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            let (id, project_dir, compressed_summary, created_at, updated_at) = row?;
+            results.push(row_to_summary(
+                id,
+                project_dir,
+                compressed_summary,
+                created_at,
+                updated_at,
+            )?);
+        }
+        Ok(results)
+    }
+
+    /// Per-tool breakdown: group compression_log by stages_applied (comma-split).
+    pub fn per_tool_breakdown(&self) -> Result<Vec<(String, u64, u64, u32)>> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT stages_applied, SUM(tokens_original), SUM(tokens_compressed), COUNT(*) \
+             FROM compression_log GROUP BY stages_applied ORDER BY COUNT(*) DESC LIMIT 20",
+            )
+            .map_err(SqzError::SessionStore)?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u32>(3)?,
+                ))
+            })
+            .map_err(SqzError::SessionStore)?;
+
+        let mut tool_map: std::collections::HashMap<String, (u64, u64, u32)> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let (stages, tokens_in, tokens_out, count) = row?;
+            for stage in stages.split(',') {
+                let stage = stage.trim();
+                if stage.is_empty() {
+                    continue;
+                }
+                let entry = tool_map.entry(stage.to_string()).or_default();
+                entry.0 += tokens_in;
+                entry.1 += tokens_out;
+                entry.2 += count;
+            }
+        }
+
+        let mut result: Vec<_> = tool_map.into_iter().collect();
+        result.sort_by(|a, b| b.1 .2.cmp(&a.1 .2));
+        Ok(result
+            .into_iter()
+            .map(|(name, (tin, tout, cnt))| (name, tin, tout, cnt))
+            .collect())
+    }
+
+    /// Per-command breakdown: group compression_log by mode.
+    pub fn per_command_breakdown(&self) -> Result<Vec<(String, u64, u64, u32)>> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT COALESCE(mode, 'auto'), SUM(tokens_original), SUM(tokens_compressed), COUNT(*) \
+             FROM compression_log GROUP BY mode ORDER BY COUNT(*) DESC LIMIT 20",
+            )
+            .map_err(SqzError::SessionStore)?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u32>(3)?,
+                ))
+            })
+            .map_err(SqzError::SessionStore)?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
     }
 }
 

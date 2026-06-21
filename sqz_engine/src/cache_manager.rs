@@ -284,6 +284,7 @@ impl CacheManager {
                 let inline_ref = format!("§ref:{hash_prefix}§");
                 // Update the sent timestamp
                 self.record_ref_sent(&hash);
+                let _ = self.store.record_cache_hit().map_err(|e| eprintln!("[sqz] cache hit record error: {e}"));
                 return Ok(CacheResult::Dedup {
                     inline_ref,
                     token_cost: 13,
@@ -291,6 +292,7 @@ impl CacheManager {
             } else {
                 // Ref is stale — re-send the full compressed content.
                 // The original may have been compacted out of the LLM's context.
+                let _ = self.store.record_cache_hit().map_err(|e| eprintln!("[sqz] cache stale-hit record error: {e}"));
                 let text = String::from_utf8_lossy(content).into_owned();
                 let ctx = SessionContext {
                     session_id: "cache".to_string(),
@@ -305,6 +307,7 @@ impl CacheManager {
 
         // Near-duplicate check: compare against recent cache entries
         let text = String::from_utf8_lossy(content).into_owned();
+        let _ = self.store.record_cache_miss().map_err(|e| eprintln!("[sqz] cache miss record error: {e}"));
         if let Some(delta_result) = self.try_delta_encode(&text)? {
             // Store the new content in cache for future exact matches
             let ctx = SessionContext {
