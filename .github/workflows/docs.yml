@@ -25,8 +25,6 @@ jobs:
 
       - name: Build docs
         run: cargo doc --workspace --no-deps --document-private-items --exclude sqz-wasm
-        env:
-          RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
 
       - name: Add redirect from root
         run: |

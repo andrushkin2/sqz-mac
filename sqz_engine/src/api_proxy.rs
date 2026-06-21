@@ -476,6 +476,21 @@ pub fn build_http_response(status: u16, status_text: &str, headers: &[(&str, &st
 mod tests {
     use super::*;
 
+    /// Build an engine backed by a per-test tempdir so parallel tests and
+    /// proptest iterations don't contend on a shared sessions.db (which
+    /// otherwise pollutes the user's real stats and trips SQLite open
+    /// races on CI runners).
+    fn isolated_engine() -> (crate::engine::SqzEngine, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = tmp.path().join("sessions.db");
+        let engine = crate::engine::SqzEngine::with_preset_and_store(
+            crate::preset::Preset::default(),
+            &store,
+        )
+        .expect("engine");
+        (engine, tmp)
+    }
+
     #[test]
     fn test_api_format_from_path() {
         assert_eq!(ApiFormat::from_path("/v1/chat/completions"), Some(ApiFormat::OpenAi));
@@ -486,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_compress_openai_request() {
-        let engine = crate::engine::SqzEngine::new().unwrap();
+        let (engine, _tmp) = isolated_engine();
         let config = ProxyConfig::default();
 
         let body = serde_json::json!({
@@ -516,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_compress_anthropic_request() {
-        let engine = crate::engine::SqzEngine::new().unwrap();
+        let (engine, _tmp) = isolated_engine();
         let config = ProxyConfig::default();
 
         let body = serde_json::json!({
@@ -544,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_compress_tool_results() {
-        let engine = crate::engine::SqzEngine::new().unwrap();
+        let (engine, _tmp) = isolated_engine();
         let config = ProxyConfig::default();
 
         // OpenAI format with tool result containing JSON with nulls
@@ -575,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_summarize_old_history() {
-        let engine = crate::engine::SqzEngine::new().unwrap();
+        let (engine, _tmp) = isolated_engine();
         let config = ProxyConfig {
             keep_recent_messages: 2,
             ..Default::default()
@@ -686,7 +701,7 @@ mod tests {
 
     #[test]
     fn test_compress_preserves_model_field() {
-        let engine = crate::engine::SqzEngine::new().unwrap();
+        let (engine, _tmp) = isolated_engine();
         let config = ProxyConfig::default();
 
         for format in [ApiFormat::OpenAi, ApiFormat::Anthropic] {
@@ -723,7 +738,7 @@ mod tests {
         fn prop_compressed_output_is_valid_json(
             content in "[a-z ]{10,200}",
         ) {
-            let engine = crate::engine::SqzEngine::new().unwrap();
+            let (engine, _tmp) = isolated_engine();
             let config = ProxyConfig::default();
             let body = serde_json::json!({
                 "model": "test",
