@@ -25,7 +25,9 @@ const RED: &str = "\x1b[31m";
 
 /// Remove ANSI escape sequences (pattern `\x1b[...m`) from `s`.
 ///
-/// Uses a simple state machine: scan for `\x1b[`, skip until `m`.
+/// Uses a simple state machine: scan for `\x1b[`, skip until a CSI final byte
+/// (any byte in `0x40..=0x7e`). This covers `m` (color), `H` (cursor home),
+/// `J` (erase display), `K` (erase line), `l`/`h` (mode set), etc.
 pub fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -33,12 +35,13 @@ pub fn strip_ansi(s: &str) -> String {
     while i < bytes.len() {
         // Look for ESC (0x1b) followed by '['
         if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            // Skip until we find 'm'
+            // Skip CSI introducer, then any parameter/intermediate bytes
+            // (0x20-0x3f) until a final byte in 0x40-0x7e.
             i += 2;
-            while i < bytes.len() && bytes[i] != b'm' {
+            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
                 i += 1;
             }
-            // Skip the 'm' itself
+            // Skip the final byte itself
             if i < bytes.len() {
                 i += 1;
             }
@@ -1117,6 +1120,32 @@ mod tests {
             format_project_display("/home/alice/projects/my-api/"),
             "projects/my-api"
         );
+    }
+
+    #[test]
+    fn test_strip_ansi_handles_color_codes() {
+        assert_eq!(strip_ansi("\x1b[1;31mhello\x1b[0m"), "hello");
+        assert_eq!(strip_ansi("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_strip_ansi_handles_non_color_csi() {
+        // Cursor home, hide cursor, erase display, erase line.
+        assert_eq!(strip_ansi("\x1b[Hhello"), "hello");
+        assert_eq!(strip_ansi("\x1b[?25lhello"), "hello");
+        assert_eq!(strip_ansi("\x1b[2Jhello"), "hello");
+        assert_eq!(strip_ansi("\x1b[Khello"), "hello");
+    }
+
+    #[test]
+    fn test_strip_ansi_full_frame_prelude() {
+        // Reproduces the non-TTY snapshot bug: render_frame starts with
+        // `\x1b[?25l\x1b[H` and the body contains an `m` byte. Old strip_ansi
+        // would eat everything up to that `m`.
+        let input = "\x1b[?25l\x1b[H  sqz vizit  \nbody with m and color \x1b[32mtext\x1b[0m end";
+        let stripped = strip_ansi(input);
+        assert!(stripped.starts_with("  sqz vizit"));
+        assert!(stripped.contains("body with m and color text end"));
     }
 
     // ── arb_path_string generator ─────────────────────────────────────────────
