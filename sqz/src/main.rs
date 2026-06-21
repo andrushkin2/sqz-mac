@@ -1920,7 +1920,31 @@ fn cmd_gain(days: u32, project: Option<String>) {
     };
 
     if gains.is_empty() {
-        if project_dir.is_some() {
+        if stats.total_compressions > 0 {
+            // We have data, just none in the window. Tell the user that
+            // explicitly so they don't think sqz isn't working.
+            if let Some(ref dir) = project_dir {
+                println!(
+                    "{}",
+                    colors::yellow(&format!(
+                        "[sqz] No compressions in the last {} days for {}, but \
+                         {} total recorded. Try `sqz gain --days 30` for a wider \
+                         window, or `sqz stats --project {}` for cumulative.",
+                        days, dir, stats.total_compressions, dir,
+                    ))
+                );
+            } else {
+                println!(
+                    "{}",
+                    colors::yellow(&format!(
+                        "[sqz] No compressions in the last {} days, but {} total \
+                         recorded. Try `sqz gain --days 30` for a wider window, \
+                         or `sqz stats` for cumulative.",
+                        days, stats.total_compressions,
+                    ))
+                );
+            }
+        } else if project_dir.is_some() {
             println!("{}", colors::yellow("[sqz] No compression data for this project yet."));
         } else {
             println!("{}", colors::yellow("[sqz] No compression data yet. Run `sqz compress` to start tracking."));
