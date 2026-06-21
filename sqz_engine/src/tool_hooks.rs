@@ -6,7 +6,7 @@
 /// happened — it just sees smaller output.
 ///
 /// Supported hook formats (tools that support command rewriting via hooks):
-/// - Claude Code: .claude/settings.local.json (nested PreToolUse, matcher: "Bash")
+/// - Claude Code: .claude/settings.local.json (nested PreToolUse, matcher: "Bash|PowerShell")
 /// - Gemini CLI: .gemini/settings.json (nested BeforeTool, matcher: "run_shell_command")
 /// - OpenCode: ~/.config/opencode/plugins/sqz.ts (TypeScript plugin, tool.execute.before)
 ///
@@ -153,7 +153,8 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
     // output by rewriting the command via PreToolUse. The MCP server
     // (sqz-mcp) provides compressed alternatives to these built-in tools.
     let is_shell = matches!(tool_name, "Bash" | "bash" | "Shell" | "shell" | "terminal"
-        | "run_terminal_command" | "run_shell_command" | "execute_bash")
+        | "run_terminal_command" | "run_shell_command" | "execute_bash"
+        | "PowerShell" | "powershell" | "pwsh")
         || matches!(hook_event, "beforeShellExecution" | "pre_run_command" | "preToolUse");
 
     if !is_shell {
@@ -389,8 +390,9 @@ path is still what you want for most output."#,
         // Claude Code — goes in .claude/settings.local.json (nested format)
         // Three hooks, each addressing a different concern:
         //
-        //   PreToolUse:   compress Bash tool output before the agent sees it
-        //                 (matcher "Bash" keeps other tools untouched)
+        //   PreToolUse:   compress shell tool output before the agent sees it
+        //                 (matcher "Bash|PowerShell" covers both Unix and
+        //                 Windows shells without firing on Read/Edit/etc.)
         //   PreCompact:   mark sqz's dedup refs stale before Claude Code
         //                 summarises older turns. Otherwise our §ref:HASH§
         //                 tokens would outlive the content they pointed at,
@@ -407,7 +409,7 @@ path is still what you want for most output."#,
   "hooks": {{
     "PreToolUse": [
       {{
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {{
             "type": "command",
@@ -1140,7 +1142,7 @@ fn install_claude_global_at(sqz_path: &str, home_override: Option<&Path>) -> Res
 
     // Build our three hook entries as fresh JSON values.
     let pre_tool_use = serde_json::json!({
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [{ "type": "command", "command": format!("{sqz_path} hook claude") }]
     });
     let pre_compact = serde_json::json!({
@@ -1527,6 +1529,39 @@ mod tests {
         let input = r#"{"tool_name":"Read","tool_input":{"file_path":"file.txt"}}"#;
         let result = process_hook(input).unwrap();
         assert_eq!(result, input, "non-bash tools should pass through unchanged");
+    }
+
+    #[test]
+    fn test_process_hook_rewrites_powershell_command() {
+        let input = r#"{"tool_name":"PowerShell","tool_input":{"command":"Get-Content big.log"}}"#;
+        let result = process_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .expect("PowerShell tool calls should be rewritten");
+        assert!(
+            cmd.contains("Get-Content big.log"),
+            "should preserve original PowerShell command: {cmd}"
+        );
+        assert!(
+            cmd.contains("sqz compress"),
+            "should pipe through sqz compress: {cmd}"
+        );
+        assert!(
+            cmd.contains("--cmd 'Get-Content big.log'"),
+            "should pass full command via --cmd: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_process_hook_rewrites_pwsh_command() {
+        let input = r#"{"tool_name":"pwsh","tool_input":{"command":"ls"}}"#;
+        let result = process_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(
+            parsed["hookSpecificOutput"]["updatedInput"]["command"].is_string(),
+            "pwsh tool calls should be rewritten"
+        );
     }
 
     #[test]
@@ -2032,7 +2067,10 @@ mod global_install_tests {
             .map(|e| e["matcher"].as_str().unwrap_or(""))
             .collect();
         assert!(matchers.contains(&"Edit"), "user's Edit hook must survive");
-        assert!(matchers.contains(&"Bash"), "sqz Bash hook must be present");
+        assert!(
+            matchers.contains(&"Bash|PowerShell"),
+            "sqz shell hook must be present (Bash|PowerShell matcher covers Windows CC, issue #26)"
+        );
     }
 
     #[test]
