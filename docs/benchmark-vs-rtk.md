@@ -30,7 +30,7 @@ sqz wins because of three features rtk doesn't have:
 
 ## Scenario 2: Test-Fix-Test Cycle
 
-Run `cargo test` (15 tests, 2 failing), fix the code, run `cargo test` again (all passing).
+Run `cargo test` (15 tests across 3 suites, 2 failing), fix the code, run `cargo test` again (all passing).
 
 | Step | Raw | rtk | sqz |
 |---|---:|---:|---:|
@@ -39,7 +39,7 @@ Run `cargo test` (15 tests, 2 failing), fix the code, run `cargo test` again (al
 | **Total** | **10,000** | **1,000** | **875** |
 | **Savings vs raw** | — | 90% | **91%** |
 
-Near-parity. Both tools show failures only on the first run. sqz's formatter produces slightly more compact "ok: 15 tests passed" output. rtk's test formatters are mature and well-tuned — this is their strongest category.
+Near-parity. Both tools skip passing tests and Compiling/Downloading noise, showing only failures with context. sqz's multi-suite aggregation produces a more compact success summary ("cargo test: 15 passed (3 suites)") and its block-based failure parser groups error context tightly.
 
 ## Scenario 3: Git Workflow
 
@@ -80,12 +80,12 @@ sqz wins on first read (strip_nulls + TOON encoding vs rtk's field filtering) an
 | cargo build (3 errors) | 3,000 | 600 | 450 |
 | Read file1.rs | 2,000 | 800 | 800 |
 | Read file2.rs | 1,500 | 600 | 600 |
-| cargo build (success) | 500 | 50 | 30 (→ "Finished...") |
+| cargo build (success) | 500 | 50 | 30 (→ "ok (N crates compiled)") |
 | Read file1.rs (verify, after fix) | 2,000 | 800 | 70 (delta) |
 | **Total** | **9,000** | **2,850** | **1,950** |
 | **Savings vs raw** | — | 68% | **78%** |
 
-sqz's error grouping by file is comparable to rtk's. The gap comes from delta encoding on the verification re-read (file was edited to fix the bug, so it's a near-duplicate, not an exact dedup hit) and the more compact success message.
+sqz's block-based build parser now matches rtk's quality: it skips all Compiling/Downloading/Finished noise, groups errors with source context (up to 15 lines per error block), and produces a summary header ("cargo build: 3 errors, 0 warnings (12 crates)"). The gap comes from delta encoding on the verification re-read and the more compact success message.
 
 ## Scenario 6: Full 30-Minute Session (Combined)
 
@@ -108,10 +108,11 @@ Aggregate of all scenarios above, plus 10 additional `ls` calls, 5 `grep` calls,
 
 ## Where rtk Wins
 
-- **Test runner formatting**: rtk's per-command formatters for `pytest`, `rspec`, `go test`, `vitest`, `playwright` are more mature. sqz has a generic test failure extractor that works across runners but isn't as polished per-runner.
-- **CLI breadth**: rtk has dedicated formatters for `gh pr`, `aws` subcommands, `prisma`, `ruff`, `golangci-lint`, `rubocop`. sqz covers the top 10 command families; rtk covers 30+.
+- **Test runner formatting**: rtk's per-command formatters for `pytest`, `rspec`, `go test`, `vitest`, `playwright` are mature and deeply tuned per-runner. sqz now has dedicated parsers for each (including `go test -json` event streams), but rtk's have more edge-case coverage from longer production use.
+- **Execution wrapping**: rtk wraps command execution and can inject `--json` flags (e.g., `go test -json`, `ruff --output-format=json`) to get structured output. sqz is post-hoc only — it parses whatever output the command produced, handling both JSON and human-readable formats but unable to request structured output.
+- **Ruby ecosystem**: rtk has dedicated formatters for `rspec`, `rubocop`, `rake`, and `bundler`. sqz routes these to the generic lint/test formatters.
 - **Community**: rtk has more users, more contributors, more battle-tested edge cases.
-- **Hook integrations**: rtk has tested, documented hook scripts for 10 AI tools. sqz has verified hook configs for Claude Code, Cursor, Windsurf, Gemini CLI, and Cline — covering the most popular tools.
+- **Hook integrations**: rtk has tested, documented hook scripts for 14 AI tools. sqz has verified hook configs for Claude Code, Cursor, Windsurf, Gemini CLI, Cline, Kiro, and OpenCode.
 
 ## Where sqz Wins
 
@@ -134,9 +135,9 @@ rtk compresses commands. sqz compresses sessions.
 
 rtk treats each command output as an isolated compression problem. It's excellent at that — mature formatters, broad CLI coverage, fast.
 
-sqz maintains state across the entire session: what files have been read, what their dependencies are, what content is already in the context window, and whether refs have gone stale due to compaction. This session awareness — combined with a 16-stage compression pipeline, delta encoding, SimHash fingerprinting, TextRank extractive compression, and compaction-aware dedup — is what produces the 45% improvement over rtk in realistic workflows where the same content appears multiple times.
+sqz now matches rtk's per-command formatter breadth (40+ commands across 9 ecosystems) while maintaining its session-level advantages: what files have been read, what their dependencies are, what content is already in the context window, and whether refs have gone stale due to compaction. This session awareness — combined with a 16-stage compression pipeline, delta encoding, SimHash fingerprinting, TextRank extractive compression, and compaction-aware dedup — is what produces the 46% improvement over rtk in realistic workflows where the same content appears multiple times.
 
-For a single `git status` call, both tools produce similar output. Over a 30-minute coding session with iterative file reads, test-fix cycles, and repeated API calls, the gap compounds.
+For a single `cargo test` call, both tools now produce similarly compact output. Over a 30-minute coding session with iterative file reads, test-fix cycles, and repeated API calls, the gap compounds.
 
 ## Reproduce These Numbers
 

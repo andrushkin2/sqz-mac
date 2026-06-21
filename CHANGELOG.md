@@ -5,6 +5,46 @@ All notable changes to sqz will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Expanded per-command formatters** — from ~12 commands to 40+ across 9
+  ecosystems (git, Rust, JS/TS, Python, Go, Cloud, Containers, JVM, System).
+  Purpose-built compression now covers the vast majority of commands seen in
+  AI coding sessions.
+- **New command support** — gh (GitHub CLI with JSON parsing), ruff, mypy, pip,
+  go test `-json` event stream parser, go build/vet, golangci-lint, grep/rg/ag
+  (group by file), tree (collapse noise directories), curl/wget (strip progress),
+  aws, terraform plan/apply/init, gcloud, gradle build/test, maven.
+- **pnpm/yarn/bun support** — package manager detection and formatting for
+  install, audit, outdated commands.
+- **ANSI pre-processing** — formatters now strip ANSI escape codes and progress
+  bars before parsing, improving reliability on colored terminal output.
+- **Truncation caps** — large outputs (>30 errors, >15 warnings) are capped
+  with "...+N more" summaries to prevent unbounded context consumption.
+- **Property tests** — 7 proptest properties ensure formatters never panic,
+  never expand output, and behave deterministically across arbitrary inputs
+  including binary data and unicode.
+- **MCP-path compression logging** — MCP tool calls (compress, sqz_read_file,
+  sqz_list_dir, sqz_grep) now log their savings to the session store, so
+  `sqz stats` and `sqz gain` reflect MCP usage, not just the shell-hook path.
+
+### Changed
+
+- **Modular architecture** — `cmd_formatters.rs` split into a directory of
+  18 files organized by ecosystem. Each ecosystem module is independently
+  testable and extensible.
+- **Cargo formatter rewrite** — block-based build parser (skips Compiling/
+  Downloading noise, groups errors with source context), multi-suite test
+  result aggregation, proper clippy formatter with error blocks and
+  warning-by-rule grouping with source locations.
+- **Git formatter improvements** — diff now includes a file-level summary
+  header (file count, +/- stats), new sub-commands: show, stash, remote,
+  fetch.
+- **npm formatter improvements** — audit (JSON + human-readable), outdated
+  package listing with truncation.
+
 ## [1.2.0] — 2026-06-02
 
 ### Added

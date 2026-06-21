@@ -230,10 +230,10 @@ Claude → git status → [sqz hook rewrites] → compressed output (85% smaller
 ```
 
 What gets compressed:
-- **Shell output** — git, cargo, npm, docker, kubectl, ls, grep, etc.
-- **JSON** — strips nulls, compact encoding
+- **Shell output** — 40+ per-command formatters (git, cargo, npm/pnpm/yarn, pytest, ruff, go test, docker, kubectl, aws, terraform, gradle, gh, grep/rg, tree, curl, and more)
+- **JSON** — strips nulls, compact encoding, TOON format
 - **Logs** — collapses repeated lines
-- **Test output** — shows failures only
+- **Test output** — shows failures only (state-machine parsers for Rust, Go, Python, JS, JVM)
 
 What doesn't get compressed:
 - Stack traces, error messages, secrets — routed to safe mode (0% compression)
@@ -363,7 +363,23 @@ Stats are stored locally in SQLite under `~/.sqz/sessions.db` — nothing leaves
 
 ## How Compression Works
 
-1. **Per-command formatters** — `git status` → compact summary, `cargo test` → failures only, `docker ps` → name/image/status table
+1. **Per-command formatters** — 40+ commands across 9 ecosystems get purpose-built compression:
+
+   | Ecosystem | Commands |
+   |---|---|
+   | Git | status, log, diff, show, stash, remote, fetch, push, pull, commit |
+   | Rust | cargo build/test/clippy/check/nextest |
+   | JavaScript | npm/pnpm/yarn/bun install/test/audit/outdated, tsc, eslint, vitest |
+   | Python | pytest, ruff, mypy, pip |
+   | Go | go test (incl. `-json` stream), go build, go vet, golangci-lint |
+   | Cloud | aws, terraform plan/apply/init, gcloud |
+   | Containers | docker/podman ps/images/build, kubectl get/describe/logs/apply |
+   | JVM | gradle build/test, maven |
+   | System | grep/rg, tree, find/fd, ls, curl/wget |
+   | GitHub | gh pr/issue/run (JSON + table) |
+
+   Unknown commands fall through to the generic compression pipeline — no output is ever left uncompressed.
+
 2. **Structural summaries** — code files compressed to imports + function signatures + call graph (~70% reduction). The model sees the architecture, not implementation noise.
 3. **Dedup cache** — SHA-256 content hash, persistent across sessions. Second read = 13-token reference.
 4. **JSON pipeline** — strip nulls → project out debug fields → flatten → collapse arrays → TOON encoding (lossless compact format)

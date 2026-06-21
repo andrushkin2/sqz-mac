@@ -4,7 +4,7 @@ Reproducible benchmark results from the sqz compression engine.
 All measurements use the `sqz compress` CLI on the inputs shown.
 Token counts use the `chars / 4` approximation (GPT-style).
 
-**Last updated:** April 2026 | **sqz version:** 0.1.1 | **Platform:** macOS aarch64
+**Last updated:** May 2026 | **sqz version:** 1.2.0 | **Platform:** macOS aarch64
 
 ---
 
@@ -126,6 +126,34 @@ diff --git a/src/main.rs b/src/main.rs
 
 Method: `git_diff_fold` stage keeps 2 context lines around each change, folds the rest.
 Critical info preserved: ✅ All changed lines (+/-) and hunk headers retained.
+
+---
+
+### 4. Per-Command Formatters (v1.2.0)
+
+Command-specific formatters run before the general compression pipeline and produce
+high savings for known commands. Every number below is measured by a fixture test
+in `sqz_engine/src/cmd_formatter_bench.rs`; the test inputs are the fixtures behind
+these figures, and each row is gated so the numbers can't silently drift:
+
+| Command | Input (tokens) | Output (tokens) | Reduction | Method |
+|---|---:|---:|---:|---|
+| `npm install` (200 packages) | 1,186 | 13 | **99%** | Summary line only |
+| `cargo test` (15 pass, 3 suites) | 171 | 8 | **95%** | Skip pass lines, aggregate suites |
+| `cargo build` (success, 30 crates) | 233 | 23 | **90%** | Skip Compiling noise, status line |
+| `grep` (100 matches, 5 files) | 1,373 | 238 | **83%** | Group by file, cap per file |
+| `terraform plan` (2 resources) | 121 | 25 | **79%** | +N ~N -N summary + resource list |
+| `cargo clippy` (5 warnings) | 163 | 70 | **57%** | Group by rule + location |
+| `git status` (verbose, 10 files) | 102 | 52 | **49%** | Compact staged/modified/untracked |
+
+Reductions scale with input size: the savings are largest on the verbose, repetitive
+output (package lists, passing-test runs, large match sets) and smaller on output that
+is already compact (a short `git status`, a handful of clippy warnings with source
+context). These formatters handle 40+ commands across 9 ecosystems. Unknown commands
+fall through to the general compression pipeline (5-58% reduction depending on content
+type).
+
+Reproduce: `cargo test -p sqz-engine cmd_formatter_bench -- --nocapture`
 
 ---
 

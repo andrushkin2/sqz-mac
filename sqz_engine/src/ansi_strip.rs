@@ -35,7 +35,7 @@ impl CompressionStage for AnsiStripper {
 ///   *not* `[` or `]`).
 ///
 /// Uses a simple state machine so there are no regex or extra dependencies.
-fn strip_ansi(input: &str) -> String {
+pub(crate) fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
 

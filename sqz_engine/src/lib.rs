@@ -56,6 +56,8 @@ pub mod api_proxy;
 pub mod ast_delta;
 pub mod ast_parser;
 pub mod benchmarks;
+#[cfg(test)]
+mod cmd_formatter_bench;
 pub mod bpe_compressor;
 pub mod cascade_compressor;
 pub mod claude_md_integration;

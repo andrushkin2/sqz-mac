@@ -246,10 +246,18 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
     // Windows) or cmd.exe — both treat `SQZ_CMD=cmd` as a literal
     // command name and raise `CommandNotFoundException`. `--cmd NAME`
     // is a normal CLI argument and all three shells parse it fine.
+    //
+    // Pass the *full* command (not just the base name): every subcommand-routed
+    // formatter — `git status`, `cargo test`, `rake test`, `go test` — needs the
+    // subcommand to dispatch. `format_command` splits and strips the path itself,
+    // so a base-name-only label silently skipped those formatters in the live
+    // hook (they only fired in unit tests / the MCP path). The command is a
+    // simple command here (compound commands bailed out above via
+    // `has_shell_operators`), so quoting it as one arg is safe.
     let rewritten = format!(
         "{} 2>&1 | sqz compress --cmd {}",
         command,
-        shell_escape(extract_base_command(command)),
+        shell_escape(command),
     );
 
     // Build platform-specific output.
@@ -1500,7 +1508,10 @@ mod tests {
         assert!(cmd.contains("git status"), "should preserve original command: {cmd}");
         // Issue #10: the label is now passed as `--cmd NAME`, not as a
         // `SQZ_CMD=NAME` prefix (sh-specific, broken on PowerShell/cmd.exe).
-        assert!(cmd.contains("--cmd git"), "should pass base command as --cmd: {cmd}");
+        assert!(
+            cmd.contains("--cmd 'git status'"),
+            "should pass the full command as --cmd so subcommand formatters dispatch: {cmd}"
+        );
         assert!(
             !cmd.contains("SQZ_CMD="),
             "new rewrites must not emit the legacy sh-style env prefix: {cmd}"
@@ -1617,7 +1628,10 @@ mod tests {
         assert!(cmd.contains("sqz compress"), "windsurf format should work: {cmd}");
         assert!(cmd.contains("cargo test"));
         // Issue #10: label is passed as `--cmd`, not `SQZ_CMD=` prefix.
-        assert!(cmd.contains("--cmd cargo"), "label must be passed via --cmd flag");
+        assert!(
+            cmd.contains("--cmd 'cargo test'"),
+            "full command must be passed via --cmd flag: {cmd}"
+        );
         assert!(!cmd.contains("SQZ_CMD="), "must not emit legacy env prefix: {cmd}");
     }
 
@@ -1666,9 +1680,9 @@ mod tests {
             .as_str()
             .unwrap();
 
-        // Must use the --cmd flag form.
+        // Must use the --cmd flag form, carrying the full command.
         assert!(
-            cmd.contains("--cmd dotnet"),
+            cmd.contains("--cmd 'dotnet build NewNeonCheckers3.sln'"),
             "issue #10: rewrite must pass label via --cmd, got: {cmd}"
         );
         // Must NOT use the sh-specific inline-env-var form.

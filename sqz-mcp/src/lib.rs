@@ -257,6 +257,20 @@ impl McpServer {
         }
     }
 
+    /// Log a compression event to the session store so `sqz gain` and
+    /// `sqz stats` reflect MCP-path savings.
+    fn log_compression(&self, tool_id: &str, tokens_original: u32, tokens_compressed: u32) {
+        let project = std::env::current_dir().ok();
+        let project_str = project.as_ref().map(|p| p.to_string_lossy().to_string());
+        let _ = self.engine.session_store().log_compression_with_project(
+            tokens_original,
+            tokens_compressed,
+            &[],
+            tool_id,
+            project_str.as_deref(),
+        );
+    }
+
     /// Compress pipeline — the historical default.
     ///
     /// Routes through the dedup cache so repeat calls with identical
@@ -271,6 +285,7 @@ impl McpServer {
 
         let tokens_original = estimate_tokens(&raw_input);
         let (output, tokens_compressed) = self.compress_cached(&raw_input)?;
+        self.log_compression(&request.tool_id, tokens_original, tokens_compressed);
 
         Ok(ToolCallResponse {
             tool_id: request.tool_id,
@@ -492,6 +507,8 @@ impl McpServer {
             )
         };
 
+        self.log_compression(&request.tool_id, tokens_original, tokens_compressed);
+
         Ok(ToolCallResponse {
             tool_id: request.tool_id,
             output,
@@ -532,6 +549,7 @@ impl McpServer {
         let raw = lines.join("\n");
         let tokens_original = estimate_tokens(&raw);
         let (compressed_data, tokens_compressed) = self.compress_cached(&raw)?;
+        self.log_compression(&request.tool_id, tokens_original, tokens_compressed);
 
         let output = format!(
             "[sqz_list_dir path={} entries={}]\n{}",
@@ -617,6 +635,7 @@ impl McpServer {
         let raw = matches.join("\n");
         let tokens_original = estimate_tokens(&raw);
         let (compressed_data, tokens_compressed) = self.compress_cached(&raw)?;
+        self.log_compression(&request.tool_id, tokens_original, tokens_compressed);
 
         let output = format!(
             "[sqz_grep pattern={:?} root={} matches={}]\n{}",
