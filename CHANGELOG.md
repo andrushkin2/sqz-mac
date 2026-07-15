@@ -12,6 +12,11 @@ a personal macOS-only fork maintained by Andrei Kozyakov, forked from upstream `
 `7fc171872ba24871d16a14133ec13f2840c5abb9` (after 1.3.0). See [FORK.md](FORK.md) for full scope.
 Everything under "Upstream history" below is unmodified upstream `sqz` history.
 
+## [1.3.0-mac.1] - 2026-07-15
+
+First tagged release of the fork: platform pruning (macOS-only), the bug
+fixes and issue verifications below, and this changelog/`FORK.md` writeup.
+
 ### Fixed
 
 - **`git` command output corrupted under a non-English shell locale** (upstream
