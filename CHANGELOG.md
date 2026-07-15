@@ -12,6 +12,35 @@ a personal macOS-only fork maintained by Andrei Kozyakov, forked from upstream `
 `7fc171872ba24871d16a14133ec13f2840c5abb9` (after 1.3.0). See [FORK.md](FORK.md) for full scope.
 Everything under "Upstream history" below is unmodified upstream `sqz` history.
 
+## [1.3.0-mac.2] - 2026-07-15
+
+### Fixed
+
+- **MCP path traversal** — `sqz_read_file`/`sqz_list_dir`/`sqz_grep` now resolve
+  requested paths against an allowed-roots guard (`allowed_roots()`/
+  `resolve_guarded_path()` in `sqz-mcp/src/lib.rs`), instead of trusting
+  caller-supplied paths outright.
+- **MCP preset not loaded at startup** — an existing preset on disk is now
+  loaded when the MCP server starts (`find_startup_preset()`/
+  `default_preset_dir()`), rather than only taking effect on the first
+  hot-reload.
+- **Hardcoded bare binary names** — the Claude Code hook rewriter, the
+  OpenCode plugin, and the generated Claude/Codex/OpenCode MCP client configs
+  previously assumed `sqz`/`sqz-mcp` were on `PATH`. They now resolve and
+  embed the actual running binary's path (`process_hook_for_platform`/
+  `install_*_mcp_config_with_path`/`update_opencode_config_detailed_with_mcp_path`).
+- **Session store had no fallback** — `SqzEngine::probe_or_fallback()` now
+  falls back to a temp-directory session store (`temp_store_path()`) instead
+  of failing outright when the primary store path can't be opened.
+
+### Changed
+
+- `Cargo.lock` is now tracked in git (previously gitignored) for reproducible
+  builds of the `sqz`/`sqz-mcp` binary crates.
+- Repo-wide `cargo fmt`.
+- Resolved all `cargo clippy --all-targets -- -D warnings` findings across
+  `sqz`, `sqz-mcp`, and `sqz_engine`.
+
 ## [1.3.0-mac.1] - 2026-07-15
 
 First tagged release of the fork: platform pruning (macOS-only), the bug
