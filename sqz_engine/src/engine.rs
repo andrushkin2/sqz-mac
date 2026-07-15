@@ -652,6 +652,38 @@ mod tests {
         );
     }
 
+    /// Regression test for upstream issue #34: multi-byte UTF-8 (non-ASCII)
+    /// input used to panic when a stage sliced a `&str` at a byte offset
+    /// that landed inside a multi-byte character instead of on a char
+    /// boundary. Fixed by routing all slicing through `safe_truncate`/
+    /// `safe_split_at`. Covers both the default and Aggressive pipelines
+    /// (Aggressive exercises entropy_truncate, the stage most likely to
+    /// slice at an arbitrary byte offset), across several multi-byte
+    /// scripts (Cyrillic, CJK, emoji with combining sequences).
+    #[test]
+    fn test_multibyte_utf8_never_panics_issue_34() {
+        let engine = SqzEngine::new().unwrap();
+        let fixtures: [&str; 4] = [
+            &"日本語のテキストです。".repeat(200),
+            &"Привет мир, это тестовая строка на русском языке. ".repeat(100),
+            &"emoji test 🎉🎉🎉 combining é a\u{0301} family 👨‍👩‍👧‍👦 ".repeat(80),
+            &"mixed ASCII and 多字节 UTF-8 été ".repeat(150),
+        ];
+
+        for input in fixtures {
+            // Default pipeline (what every real command output goes through).
+            let result = engine.compress(input);
+            assert!(result.is_ok(), "default pipeline panicked/errored on multi-byte input");
+
+            // Aggressive pipeline (exercises entropy_truncate's slicing paths).
+            let aggressive = engine.compress_with_mode(
+                input,
+                crate::confidence_router::CompressionMode::Aggressive,
+            );
+            assert!(aggressive.is_ok(), "aggressive pipeline panicked/errored on multi-byte input");
+        }
+    }
+
     #[test]
     fn test_export_import_ctx_round_trip() {
         let dir = tempfile::tempdir().unwrap();
