@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 const BASH_HOOK: &str = r#"
 # sqz — context intelligence layer (auto-installed)
+# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
+# they can't parse. Remove this line (or set to 0) to opt back in.
+export SQZ_NO_DEDUP=1
 __sqz_preexec() {
     export __SQZ_CMD="$BASH_COMMAND"
 }
@@ -30,6 +33,9 @@ sqz_sudo() {
 
 const ZSH_HOOK: &str = r#"
 # sqz — context intelligence layer (auto-installed)
+# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
+# they can't parse. Remove this line (or set to 0) to opt back in.
+export SQZ_NO_DEDUP=1
 sqz_run() {
     "$@" 2>&1 | SQZ_CMD="$*" sqz compress
 }
@@ -44,6 +50,9 @@ preexec() {
 
 const FISH_HOOK: &str = r#"
 # sqz — context intelligence layer (auto-installed)
+# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
+# they can't parse. Remove this line (or set to 0) to opt back in.
+set -gx SQZ_NO_DEDUP 1
 function sqz_run
     set -lx SQZ_CMD (string join " " $argv)
     $argv 2>&1 | sqz compress
@@ -57,6 +66,9 @@ end
 
 const NUSHELL_HOOK: &str = r#"
 # sqz — context intelligence layer (auto-installed)
+# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
+# they can't parse. Remove this line (or set to 0) to opt back in.
+$env.SQZ_NO_DEDUP = "1"
 def sqz_run [...args: string] {
     $env.SQZ_CMD = ($args | str join " ")
     run-external $args.0 ...$args[1..] | sqz compress
@@ -66,6 +78,9 @@ def sqz_run [...args: string] {
 
 const POWERSHELL_HOOK: &str = r#"
 # sqz — context intelligence layer (auto-installed)
+# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
+# they can't parse. Remove this line (or set to 0) to opt back in.
+$env:SQZ_NO_DEDUP = "1"
 function Invoke-SqzRun {
     param([string[]]$Command)
     $env:SQZ_CMD = ($Command -join " ")

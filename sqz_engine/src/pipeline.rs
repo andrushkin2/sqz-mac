@@ -1,4 +1,5 @@
 use crate::ansi_strip::AnsiStripper;
+use crate::confidence_router::CompressionMode;
 use crate::dict_compressor::DictCompressor;
 use crate::entropy_truncator::EntropyTruncator;
 use crate::error::{Result, SqzError};
@@ -71,13 +72,23 @@ impl CompressionPipeline {
 
     /// Run content through all enabled stages, then apply:
     /// 1. Dictionary compression + TOON encoding for JSON
-    /// 2. Token pruning for prose/plain text
-    /// 3. Entropy-weighted truncation for long content
+    /// 2. Token pruning for prose/plain text (lossy — `Aggressive` mode only)
+    /// 3. Entropy-weighted truncation for long content (lossy — `Aggressive` mode only)
+    ///
+    /// `mode` gates the lossy subsystem (RLE run-collapse, sliding-window
+    /// dedup, entropy-weighted truncation, token pruning): these only run
+    /// when `mode == CompressionMode::Aggressive`. `Safe` and `Default`
+    /// skip them entirely, so the only transforms applied are the
+    /// deterministic stage pipeline (condense, strip-nulls, flatten, etc.)
+    /// and JSON/TOON encoding — never lossy content mutation. This is the
+    /// fix for `--mode safe` previously still truncating/corrupting output
+    /// (see FORK.md / sqz-mac-fork.md Phase 3).
     pub fn compress(
         &self,
         input: &str,
         _ctx: &SessionContext,
         preset: &Preset,
+        mode: CompressionMode,
     ) -> Result<CompressedContent> {
         let model_family = model_family_from_preset(preset);
         let tokens_original = self.token_counter.count(input, &model_family);
@@ -119,53 +130,63 @@ impl CompressionPipeline {
             }
         }
 
-        // RLE: collapse repeated patterns in non-JSON content (generalizes condense)
-        // Only apply when content is long enough to benefit
-        if !is_json && content.raw.len() > 200 {
-            if let Ok(rle_result) = crate::rle_compressor::rle_compress(&content.raw, 3) {
-                if rle_result.runs_collapsed > 0 {
-                    // Safety check: verify critical markers are preserved
-                    let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
-                    let rle_has_error = rle_result.text.contains("ERROR") || rle_result.text.contains("error:");
-                    if !has_error || rle_has_error {
-                        content.raw = rle_result.text;
-                        stages_applied.push("rle".to_owned());
+        // ── Lossy subsystem: RLE, sliding-window dedup, entropy-weighted
+        // truncation, and token pruning. These mutate/drop content rather
+        // than losslessly re-encode it, so they only run in
+        // `CompressionMode::Aggressive` (explicit opt-in). `Safe` and
+        // `Default` skip this block entirely — this is the fix for
+        // "--mode safe" previously still truncating/corrupting output
+        // (a real 300-line Rust source file lost a function and gained a
+        // dangling `[→LN]` back-reference during review testing).
+        if mode == CompressionMode::Aggressive {
+            // RLE: collapse repeated patterns in non-JSON content (generalizes condense)
+            // Only apply when content is long enough to benefit
+            if !is_json && content.raw.len() > 200 {
+                if let Ok(rle_result) = crate::rle_compressor::rle_compress(&content.raw, 3) {
+                    if rle_result.runs_collapsed > 0 {
+                        // Safety check: verify critical markers are preserved
+                        let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
+                        let rle_has_error = rle_result.text.contains("ERROR") || rle_result.text.contains("error:");
+                        if !has_error || rle_has_error {
+                            content.raw = rle_result.text;
+                            stages_applied.push("rle".to_owned());
+                        }
                     }
                 }
             }
-        }
 
-        // Sliding window dedup: catch repeated substrings across non-adjacent lines
-        if !is_json && content.raw.len() > 300 {
-            if let Ok(sw_result) = crate::rle_compressor::sliding_window_dedup(&content.raw, 4) {
-                if sw_result.dedup_count > 0 {
-                    // Safety check: verify critical markers are preserved
-                    let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
-                    let sw_has_error = sw_result.text.contains("ERROR") || sw_result.text.contains("error:");
-                    if !has_error || sw_has_error {
-                        content.raw = sw_result.text;
-                        stages_applied.push("sliding_window_dedup".to_owned());
+            // Sliding window dedup: catch repeated substrings across non-adjacent lines
+            if !is_json && content.raw.len() > 300 {
+                if let Ok(sw_result) = crate::rle_compressor::sliding_window_dedup(&content.raw, 4) {
+                    if sw_result.dedup_count > 0 {
+                        // Safety check: verify critical markers are preserved
+                        let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
+                        let sw_has_error = sw_result.text.contains("ERROR") || sw_result.text.contains("error:");
+                        if !has_error || sw_has_error {
+                            content.raw = sw_result.text;
+                            stages_applied.push("sliding_window_dedup".to_owned());
+                        }
                     }
                 }
             }
-        }
 
-        // Entropy-weighted truncation for long non-JSON content
-        if !is_json && content.raw.len() > 500 {
-            if let Ok(trunc_result) = self.entropy_truncator.truncate_string(&content.raw) {
-                if trunc_result.segments_dropped > 0 {
-                    content.raw = trunc_result.text;
-                    stages_applied.push("entropy_truncate".to_owned());
+            // Entropy-weighted truncation for long non-JSON content
+            if !is_json && content.raw.len() > 500 {
+                if let Ok(trunc_result) = self.entropy_truncator.truncate_string(&content.raw) {
+                    if trunc_result.segments_dropped > 0 {
+                        content.raw = trunc_result.text;
+                        stages_applied.push("entropy_truncate".to_owned());
+                    }
                 }
             }
-        }
 
-        // Token pruning for prose content (non-JSON, non-code)
-        if !is_json && content.raw.len() > 100 && looks_like_prose(&content.raw) {
-            if let Ok(prune_result) = self.token_pruner.prune(&content.raw) {
-                if prune_result.tokens_removed > 0 {
-                    content.raw = prune_result.text;
-                    stages_applied.push("token_prune".to_owned());
+            // Token pruning for prose content (non-JSON, non-code)
+            if !is_json && content.raw.len() > 100 && looks_like_prose(&content.raw) {
+                if let Ok(prune_result) = self.token_pruner.prune(&content.raw) {
+                    if prune_result.tokens_removed > 0 {
+                        content.raw = prune_result.text;
+                        stages_applied.push("token_prune".to_owned());
+                    }
                 }
             }
         }
@@ -507,7 +528,7 @@ mod tests {
     fn compress_plain_text_passthrough() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("hello world", &ctx(), &preset).unwrap();
+        let result = pipeline.compress("hello world", &ctx(), &preset, CompressionMode::Default).unwrap();
         assert_eq!(result.data, "hello world");
         assert!(!result.stages_applied.contains(&"toon_encode".to_owned()));
     }
@@ -517,7 +538,7 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"name":"Alice","age":30}"#;
-        let result = pipeline.compress(json, &ctx(), &preset).unwrap();
+        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
         assert!(result.data.starts_with("TOON:"), "data: {}", result.data);
         assert!(result.stages_applied.contains(&"toon_encode".to_owned()));
     }
@@ -527,7 +548,7 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"a":1,"b":null}"#;
-        let result = pipeline.compress(json, &ctx(), &preset).unwrap();
+        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
         // After strip_nulls, "b" is gone; TOON encodes the result
         assert!(result.data.starts_with("TOON:"));
         // Decode and verify null is gone
@@ -541,7 +562,7 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let input = "a".repeat(100);
-        let result = pipeline.compress(&input, &ctx(), &preset).unwrap();
+        let result = pipeline.compress(&input, &ctx(), &preset, CompressionMode::Default).unwrap();
         assert!(result.tokens_original > 0);
         assert!(result.tokens_compressed > 0);
     }
@@ -550,7 +571,7 @@ mod tests {
     fn compress_ratio_is_reasonable() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("hello", &ctx(), &preset).unwrap();
+        let result = pipeline.compress("hello", &ctx(), &preset, CompressionMode::Default).unwrap();
         assert!(result.compression_ratio > 0.0);
     }
 
@@ -607,7 +628,7 @@ mod tests {
         });
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"id":1,"name":"Bob","debug":"x"}"#;
-        let result = pipeline.compress(json, &ctx(), &preset).unwrap();
+        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
         let decoded = ToonEncoder.decode(&result.data).unwrap();
         assert!(decoded.get("debug").is_none());
         assert_eq!(decoded["id"], serde_json::json!(1));
@@ -617,9 +638,127 @@ mod tests {
     fn compress_empty_string() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("", &ctx(), &preset).unwrap();
+        let result = pipeline.compress("", &ctx(), &preset, CompressionMode::Default).unwrap();
         assert_eq!(result.data, "");
         assert_eq!(result.tokens_original, 0);
+    }
+
+    // ── Phase 3: lossy subsystem gating ─────────────────────────────────
+    //
+    // "--mode safe" (and Default) previously still ran RLE, sliding-window
+    // dedup, entropy truncation, and token pruning unconditionally — the
+    // pipeline had no idea what mode it was compressing in. This is the
+    // fixture that proves the fix: real, non-JSON, non-high-entropy content
+    // that the lossy subsystem *does* mutate under Aggressive (confirmed
+    // via `sliding_window_dedup`, which emits `[→L{line}]` back-references —
+    // exactly the corruption class described in sqz-mac-fork.md Phase 3),
+    // but must pass through byte-for-byte unmodified by that subsystem
+    // under Safe/Default.
+    fn repeated_line_fixture() -> String {
+        let mut s = String::new();
+        for i in 0..80 {
+            s.push_str(&format!("heartbeat check {} status ok all systems nominal\n", i % 3));
+        }
+        s
+    }
+
+    #[test]
+    fn compress_aggressive_mode_runs_lossy_subsystem() {
+        let preset = default_preset();
+        let pipeline = CompressionPipeline::new(&preset);
+        let input = repeated_line_fixture();
+        let result = pipeline
+            .compress(&input, &ctx(), &preset, CompressionMode::Aggressive)
+            .unwrap();
+        // Sanity check the fixture actually exercises the lossy subsystem —
+        // otherwise the Default/Safe tests below would pass vacuously.
+        assert!(
+            result.stages_applied.iter().any(|s| {
+                s == "rle" || s == "sliding_window_dedup" || s == "entropy_truncate" || s == "token_prune"
+            }),
+            "fixture should trigger at least one lossy stage in Aggressive mode, got: {:?}",
+            result.stages_applied
+        );
+    }
+
+    #[test]
+    fn compress_default_mode_never_runs_lossy_subsystem() {
+        let preset = default_preset();
+        let pipeline = CompressionPipeline::new(&preset);
+        let input = repeated_line_fixture();
+        let result = pipeline
+            .compress(&input, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "Default mode ran lossy stage {:?}: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
+        // No dangling sliding-window back-references in the output either.
+        assert!(!result.data.contains("[→L"), "output: {}", result.data);
+    }
+
+    #[test]
+    fn compress_safe_mode_never_runs_lossy_subsystem() {
+        let preset = default_preset();
+        let pipeline = CompressionPipeline::new(&preset);
+        let input = repeated_line_fixture();
+        let result = pipeline
+            .compress(&input, &ctx(), &preset, CompressionMode::Safe)
+            .unwrap();
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "Safe mode ran lossy stage {:?}: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
+        assert!(!result.data.contains("[→L"), "output: {}", result.data);
+    }
+
+    /// Regression test locking in the exact review-report bug: compressing
+    /// a real ~300-line Rust source file in Default mode must never
+    /// corrupt it structurally (unbalanced braces, dropped functions,
+    /// dangling `[→LN]` back-references). Default mode's only transforms
+    /// are the deterministic stage pipeline (ANSI strip, condense, etc.) —
+    /// none of them touch brace/paren/bracket balance or line count in a
+    /// way that can desync a back-reference, unlike the lossy subsystem.
+    #[test]
+    fn compress_real_source_file_default_mode_preserves_structure() {
+        let preset = default_preset();
+        let pipeline = CompressionPipeline::new(&preset);
+        // Use another module in this crate as the "real ~300-line Rust
+        // source" fixture — well over 300 lines, high-entropy (not
+        // boilerplate), representative of what `sqz compress` sees piped
+        // from `cat`. (Not `pipeline.rs` itself: this file's own doc
+        // comments mention the `[→L` back-reference token literally,
+        // which would make the "no dangling back-reference" assertion
+        // below self-referentially meaningless.)
+        let input = include_str!("context_evictor.rs");
+        assert!(input.lines().count() > 300, "fixture should be a substantial source file");
+
+        let result = pipeline
+            .compress(input, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
+
+        let count = |s: &str, needle: char| s.chars().filter(|&c| c == needle).count();
+        assert_eq!(count(input, '{'), count(&result.data, '{'), "brace count changed");
+        assert_eq!(count(input, '}'), count(&result.data, '}'), "brace count changed");
+        assert_eq!(count(input, '('), count(&result.data, '('), "paren count changed");
+        assert_eq!(count(input, ')'), count(&result.data, ')'), "paren count changed");
+        assert!(!result.data.contains("[→L"), "dangling back-reference in output");
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "Default mode ran lossy stage {:?} on real source file: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
     }
 
     #[test]
@@ -696,7 +835,7 @@ mod tests {
             let pipeline = CompressionPipeline::new(&preset);
 
             let json_input = serde_json::to_string(&v).expect("serialize should not fail");
-            let result = pipeline.compress(&json_input, &ctx(), &preset)
+            let result = pipeline.compress(&json_input, &ctx(), &preset, CompressionMode::Default)
                 .expect("compress should not fail");
 
             for ch in result.data.chars() {
@@ -745,7 +884,7 @@ mod tests {
             }
 
             let input = lines.join("\n");
-            let result = pipeline.compress(&input, &ctx(), &preset).unwrap();
+            let result = pipeline.compress(&input, &ctx(), &preset, CompressionMode::Default).unwrap();
             let output = &result.data;
 
             // 1. All significant lines must appear in the output.
@@ -779,3 +918,5 @@ mod tests {
         }
     }
 }
+
+

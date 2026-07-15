@@ -143,8 +143,12 @@ impl SqzEngine {
             return self.compress_safe(input, &pipeline, &ctx);
         }
 
-        // Step 3: Compress with the configured pipeline
-        let mut result = pipeline.compress(input, &ctx, &preset)?;
+        // Step 3: Compress with the configured pipeline. `mode` here is
+        // whatever the confidence router picked (Default or Aggressive —
+        // Safe already returned above), so the lossy subsystem only runs
+        // when the router explicitly classified this content as safe to
+        // compress aggressively.
+        let mut result = pipeline.compress(input, &ctx, &preset, mode)?;
 
         // Step 4: Verify invariants
         let verify = Verifier::verify(input, &result.data);
@@ -219,26 +223,51 @@ impl SqzEngine {
 
     /// Compress with explicit mode override, bypassing the confidence router.
     ///
-    /// - `CompressionMode::Safe` → safe pipeline only (ANSI strip + condense)
-    /// - `CompressionMode::Default` → standard pipeline
-    /// - `CompressionMode::Aggressive` → standard pipeline (aggressive preset TBD)
+    /// - `CompressionMode::Safe` → safe pipeline only (ANSI strip + condense),
+    ///   the lossy subsystem never runs.
+    /// - `CompressionMode::Default` → standard pipeline, lossy subsystem
+    ///   (RLE / sliding-window dedup / entropy truncation / token pruning)
+    ///   does not run.
+    /// - `CompressionMode::Aggressive` → standard pipeline with the lossy
+    ///   subsystem enabled.
+    ///
+    /// The requested `mode` is honored end-to-end — this method does *not*
+    /// re-route through [`ConfidenceRouter`] like [`compress`](Self::compress)
+    /// does, so a caller that explicitly asks for `Aggressive` (e.g.
+    /// `cli_proxy`'s session-pressure escalation) actually gets it, rather
+    /// than being silently downgraded back to whatever the router would
+    /// have picked. A low-confidence verifier result still falls back to
+    /// safe mode regardless of the requested mode — that safety net stays
+    /// on for every mode.
     pub fn compress_with_mode(&self, input: &str, mode: crate::confidence_router::CompressionMode) -> Result<CompressedContent> {
+        let preset = self.preset.lock()
+            .map_err(|_| SqzError::Other("preset lock poisoned".into()))?;
         let pipeline = self.pipeline.lock()
             .map_err(|_| SqzError::Other("pipeline lock poisoned".into()))?;
         let ctx = crate::pipeline::SessionContext {
             session_id: "engine".to_string(),
         };
 
-        match mode {
-            crate::confidence_router::CompressionMode::Safe => {
-                self.compress_safe(input, &pipeline, &ctx)
-            }
-            _ => {
-                // Default and Aggressive: run normal pipeline + verify
-                drop(pipeline); // release lock before calling compress()
-                self.compress(input)
-            }
+        if mode == crate::confidence_router::CompressionMode::Safe {
+            return self.compress_safe(input, &pipeline, &ctx);
         }
+
+        // Default and Aggressive: compress with the caller's explicit mode,
+        // then verify invariants and fall back to safe mode if confidence
+        // is low — same safety net as `compress()`, minus the initial
+        // confidence-router pass (the caller already decided the mode).
+        let mut result = pipeline.compress(input, &ctx, &preset, mode)?;
+        let verify = Verifier::verify(input, &result.data);
+        let fallback = verify.fallback_triggered;
+        result.verify = Some(verify);
+
+        if fallback && result.data != input {
+            eprintln!("[sqz] fallback: verifier confidence {:.2} below threshold — re-compressing in safe mode",
+                result.verify.as_ref().map(|v| v.confidence).unwrap_or(0.0));
+            return self.compress_safe(input, &pipeline, &ctx);
+        }
+
+        Ok(result)
     }
 
     /// Safe-mode compression: minimal transforms only (ANSI strip + condense).
@@ -292,7 +321,12 @@ impl SqzEngine {
             },
         };
 
-        let mut result = pipeline.compress(input, ctx, &safe_preset)?;
+        let mut result = pipeline.compress(
+            input,
+            ctx,
+            &safe_preset,
+            crate::confidence_router::CompressionMode::Safe,
+        )?;
         let verify = Verifier::verify(input, &result.data);
         result.verify = Some(verify);
         result.provenance = Provenance {
@@ -640,5 +674,92 @@ complexity_threshold = 0.4
         let engine = SqzEngine::new().unwrap();
         let result = engine.import_ctx("not valid json {{{");
         assert!(result.is_err());
+    }
+
+    // ── Phase 3: mode plumbing ───────────────────────────────────────────
+
+    /// Content that the confidence router classifies as `Default` on its
+    /// own (not low-entropy enough to auto-route to `Aggressive`), but
+    /// that the lossy subsystem *does* mutate when explicitly requested —
+    /// used to prove `compress_with_mode` honors an explicit override
+    /// rather than silently re-routing through the confidence router.
+    fn repeated_line_fixture() -> String {
+        let mut s = String::new();
+        for i in 0..80 {
+            s.push_str(&format!("heartbeat check {} status ok all systems nominal\n", i % 3));
+        }
+        s
+    }
+
+    #[test]
+    fn test_compress_with_mode_default_skips_lossy_subsystem() {
+        let engine = SqzEngine::new().unwrap();
+        let input = repeated_line_fixture();
+        let result = engine
+            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Default)
+            .unwrap();
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "Default mode ran lossy stage {:?}: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
+    }
+
+    #[test]
+    fn test_compress_with_mode_safe_skips_lossy_subsystem() {
+        let engine = SqzEngine::new().unwrap();
+        let input = repeated_line_fixture();
+        let result = engine
+            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Safe)
+            .unwrap();
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "Safe mode ran lossy stage {:?}: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
+    }
+
+    /// Regression test: an explicit `Aggressive` request must actually run
+    /// the lossy subsystem end-to-end, even for content the confidence
+    /// router would otherwise classify as `Default` on its own. Before the
+    /// Phase 3 fix, `compress_with_mode` for any non-`Safe` mode dropped
+    /// the caller's requested mode entirely and delegated to `compress()`,
+    /// which re-routes through the confidence router — silently
+    /// downgrading an explicit `Aggressive` escalation (e.g. `cli_proxy`'s
+    /// session-pressure-based escalation) back to whatever the router
+    /// picked.
+    #[test]
+    fn test_compress_with_mode_aggressive_is_honored_end_to_end() {
+        let engine = SqzEngine::new().unwrap();
+        let input = repeated_line_fixture();
+
+        // Sanity: the confidence router does NOT pick Aggressive for this
+        // content on its own.
+        let auto_mode = engine.route_compression_mode(&input);
+        assert_ne!(
+            auto_mode,
+            crate::confidence_router::CompressionMode::Aggressive,
+            "fixture should not auto-route to Aggressive, otherwise this test doesn't \
+             prove the explicit override is honored"
+        );
+
+        let result = engine
+            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Aggressive)
+            .unwrap();
+        assert!(
+            result.stages_applied.iter().any(|s| {
+                s == "rle" || s == "sliding_window_dedup" || s == "entropy_truncate" || s == "token_prune"
+            }),
+            "explicit Aggressive request should run the lossy subsystem even though \
+             the confidence router would have picked {:?}, got stages: {:?}",
+            auto_mode,
+            result.stages_applied
+        );
     }
 }

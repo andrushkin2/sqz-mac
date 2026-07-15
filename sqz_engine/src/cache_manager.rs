@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+use crate::confidence_router::CompressionMode;
 use crate::delta_encoder::DeltaEncoder;
 use crate::error::Result;
 use crate::pipeline::{CompressionPipeline, SessionContext};
@@ -298,7 +299,7 @@ impl CacheManager {
                     session_id: "cache".to_string(),
                 };
                 let preset = Preset::default();
-                let compressed = pipeline.compress(&text, &ctx, &preset)?;
+                let compressed = pipeline.compress(&text, &ctx, &preset, CompressionMode::Default)?;
                 // Record that we re-sent this content
                 self.record_ref_sent(&hash);
                 return Ok(CacheResult::Fresh { output: compressed });
@@ -314,7 +315,7 @@ impl CacheManager {
                 session_id: "cache".to_string(),
             };
             let preset = Preset::default();
-            let compressed = pipeline.compress(&text, &ctx, &preset)?;
+            let compressed = pipeline.compress(&text, &ctx, &preset, CompressionMode::Default)?;
             // Persist the raw bytes so `sqz expand <prefix>` can round-trip.
             self.store
                 .save_cache_entry_with_original(&hash, &compressed, Some(content))?;
@@ -332,7 +333,7 @@ impl CacheManager {
             session_id: "cache".to_string(),
         };
         let preset = Preset::default();
-        let compressed = pipeline.compress(&text, &ctx, &preset)?;
+        let compressed = pipeline.compress(&text, &ctx, &preset, CompressionMode::Default)?;
         self.store
             .save_cache_entry_with_original(&hash, &compressed, Some(content))?;
         // Record that this content was sent at the current turn
