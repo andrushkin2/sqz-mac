@@ -2259,6 +2259,48 @@ mod global_install_tests {
         assert!(!path.exists(), "sqz-only settings.json should be removed on uninstall");
     }
 
+    /// Consolidated regression test for upstream issue #21: `sqz init`
+    /// repeatedly re-run must never accumulate duplicate hook entries in
+    /// `~/.claude/settings.json`, and `sqz uninstall` must remove all of
+    /// them. Verified end-to-end against the built binary in an isolated
+    /// $HOME (4x `sqz init --global` + `sqz uninstall`) during development
+    /// of this fix; this test locks the same guarantee in at the unit
+    /// level so it runs in CI without spawning a subprocess.
+    #[test]
+    fn global_init_then_uninstall_round_trip_is_idempotent_issue_21() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings = tmp.path().join(".claude").join("settings.json");
+
+        // Re-running init multiple times (simulating repeated
+        // install/reinstall cycles) must converge to exactly one entry
+        // per hook event, not accumulate duplicates.
+        for _ in 0..4 {
+            install_claude_global_at("/usr/local/bin/sqz", Some(tmp.path())).unwrap();
+        }
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        for event in ["PreToolUse", "PreCompact", "SessionStart"] {
+            let arr = parsed["hooks"][event].as_array().unwrap_or_else(|| {
+                panic!("expected hooks.{event} to be an array in {parsed}")
+            });
+            assert_eq!(
+                arr.len(),
+                1,
+                "hooks.{event} must have exactly 1 entry after 4 init runs, got: {arr:?}"
+            );
+        }
+
+        // Uninstall must remove every sqz-owned entry — and since sqz was
+        // the settings.json's only content, the file itself is removed.
+        let result = remove_claude_global_hook_at(Some(tmp.path())).unwrap().unwrap();
+        assert!(result.1, "uninstall should report the file was modified");
+        assert!(
+            !settings.exists(),
+            "sqz-only settings.json should be fully removed after uninstall"
+        );
+    }
+
     #[test]
     fn global_uninstall_on_missing_file_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
