@@ -109,6 +109,7 @@ pub mod sandbox_executor;
 pub mod session_continuity;
 pub mod session_store;
 pub mod stages;
+pub mod str_utils;
 pub mod structural_summary;
 pub mod tee_mode;
 pub mod terse_mode;

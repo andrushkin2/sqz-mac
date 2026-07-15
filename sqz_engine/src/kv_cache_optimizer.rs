@@ -24,6 +24,7 @@
 //! assert!(!result.is_empty());
 //! ```
 
+use crate::str_utils::safe_split_at;
 use crate::types::ModelFamily;
 
 /// Default number of attention sink tokens to always preserve.
@@ -75,9 +76,10 @@ pub fn compress_with_sinks(content: &str, model_family: &ModelFamily) -> String 
     // Clamp to content length
     let protected_prefix = protected_prefix.min(content.len());
 
-    // Split content into protected and compressible regions
-    let protected = &content[..protected_prefix];
-    let compressible = &content[protected_prefix..];
+    // Split content into protected and compressible regions. `protected_prefix`
+    // is a heuristic char-count-derived byte offset and may land inside a
+    // multi-byte UTF-8 sequence, so round down to the nearest char boundary.
+    let (protected, compressible) = safe_split_at(content, protected_prefix);
 
     if compressible.is_empty() {
         return content.to_string();
@@ -118,8 +120,7 @@ pub fn compress_with_custom_sinks(
     };
 
     let protected_prefix = protected_prefix.min(content.len());
-    let protected = &content[..protected_prefix];
-    let compressible = &content[protected_prefix..];
+    let (protected, compressible) = safe_split_at(content, protected_prefix);
 
     if compressible.is_empty() {
         return content.to_string();
@@ -269,6 +270,64 @@ mod tests {
         );
         // First 40 chars should be preserved
         assert!(result.starts_with(&"a".repeat(40)));
+    }
+
+    /// Regression test: the protected-prefix boundary (sink_chars, or the
+    /// OpenAI 4096-char boundary) must not panic when it lands in the middle
+    /// of a multi-byte UTF-8 character.
+    /// See sqz-mac-fork.md Phase 2 / kv_cache_optimizer.rs:79.
+    #[test]
+    fn test_compress_with_sinks_multibyte_utf8_at_sink_boundary_does_not_panic() {
+        // DEFAULT_SINK_TOKENS * CHARS_PER_TOKEN == 16. Place a 3-byte CJK
+        // character straddling byte offset 16.
+        let content = format!("{}中文测试{}", "a".repeat(14), "repeated line\n".repeat(20));
+        for model in [
+            ModelFamily::AnthropicClaude,
+            ModelFamily::OpenAiGpt,
+            ModelFamily::GoogleGemini,
+            ModelFamily::Local("llama".into()),
+        ] {
+            let result = compress_with_sinks(&content, &model); // must not panic
+            assert!(!result.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_compress_with_sinks_multibyte_utf8_at_openai_boundary_does_not_panic() {
+        // OpenAI boundary is 4096 chars. Put a 4-byte emoji straddling it.
+        let prefix = "x".repeat(4094);
+        let content = format!("{prefix}🎉{}", "repeated line\n".repeat(20));
+        let result = compress_with_sinks(&content, &ModelFamily::OpenAiGpt); // must not panic
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_compress_with_custom_sinks_multibyte_utf8_does_not_panic() {
+        // 10 sink tokens * 4 chars/token = 40 chars; straddle with emoji.
+        let prefix = "a".repeat(38);
+        let content = format!("{prefix}🎉{}", "b".repeat(100));
+        let result = compress_with_custom_sinks(&content, &ModelFamily::GoogleGemini, 10);
+        assert!(!result.is_empty());
+    }
+
+    // Property test: for any UTF-8 string (including multi-byte chars) and
+    // any sink token count, compression never panics.
+    proptest! {
+        #[test]
+        fn prop_compress_with_sinks_never_panics_on_arbitrary_utf8(
+            content in ".{0,300}",
+            model in arb_model_family(),
+        ) {
+            let _ = compress_with_sinks(&content, &model); // must not panic
+        }
+
+        #[test]
+        fn prop_compress_with_custom_sinks_never_panics_on_arbitrary_utf8(
+            content in ".{0,300}",
+            sink_tokens in 0usize..50usize,
+        ) {
+            let _ = compress_with_custom_sinks(&content, &ModelFamily::AnthropicClaude, sink_tokens); // must not panic
+        }
     }
 
     #[test]

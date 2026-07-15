@@ -18,6 +18,7 @@
 
 use tree_sitter::{Language, Parser, Node};
 use crate::error::{Result, SqzError};
+use crate::str_utils::safe_truncate;
 
 /// A single change in the AST delta.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,7 +284,7 @@ fn truncate_preview(s: &str, max_len: usize) -> String {
     if single_line.len() <= max_len {
         single_line
     } else {
-        format!("{}…", &single_line[..max_len])
+        format!("{}…", safe_truncate(&single_line, max_len))
     }
 }
 
@@ -363,6 +364,24 @@ mod tests {
         let delta = ast_diff(code, code, "rust").unwrap();
         assert!(delta.old_node_count > 0);
         assert_eq!(delta.old_node_count, delta.new_node_count);
+    }
+
+    /// Regression test: truncate_preview must not panic when max_len lands
+    /// in the middle of a multi-byte UTF-8 character.
+    /// See sqz-mac-fork.md Phase 2 / ast_delta.rs:286.
+    #[test]
+    fn test_truncate_preview_multibyte_utf8_does_not_panic() {
+        // 59 ASCII chars then a 3-byte CJK char straddling byte offset 60.
+        let s = format!("{}中文测试内容更多内容", "a".repeat(59));
+        let preview = truncate_preview(&s, 60); // must not panic
+        assert!(preview.ends_with('…'));
+        assert!(preview.len() <= 60 + '…'.len_utf8());
+    }
+
+    #[test]
+    fn test_truncate_preview_short_string_unchanged() {
+        let s = "short text";
+        assert_eq!(truncate_preview(s, 60), s);
     }
 
     // ── Property-based tests ──────────────────────────────────────────────

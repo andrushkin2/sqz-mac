@@ -155,8 +155,11 @@ impl ConfidenceRouter {
         let mut commit_lines = 0;
         for line in &lines {
             let trimmed = line.trim();
-            // Short hash prefix: "abc1234 feat: ..."
-            if trimmed.len() > 8 && trimmed[..7].chars().all(|c| c.is_ascii_hexdigit()) {
+            // Short hash prefix: "abc1234 feat: ...". Iterate by char (not a
+            // fixed byte offset) so multi-byte UTF-8 content can't panic here.
+            if trimmed.len() > 8 && trimmed.chars().take(7).count() == 7
+                && trimmed.chars().take(7).all(|c| c.is_ascii_hexdigit())
+            {
                 commit_lines += 1;
             }
             // Conventional commit prefix
@@ -180,6 +183,17 @@ impl ConfidenceRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test: looks_like_commit_log must not panic when a line's
+    /// first 7 bytes straddle a multi-byte UTF-8 character.
+    /// See sqz-mac-fork.md Phase 2 / confidence_router.rs:159.
+    #[test]
+    fn looks_like_commit_log_multibyte_utf8_does_not_panic() {
+        let router = ConfidenceRouter::new();
+        // 6 ASCII bytes then a 3-byte CJK char: byte offset 7 lands mid-char.
+        let content = "abcdef中文 commit message here\nsecond line of content";
+        let _ = router.looks_like_commit_log(&content.to_lowercase()); // must not panic
+    }
 
     #[test]
     fn routes_stack_trace_to_safe() {

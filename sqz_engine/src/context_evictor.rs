@@ -9,6 +9,7 @@
 /// can suggest eviction when the budget approaches the ceiling.
 
 use crate::error::Result;
+use crate::str_utils::safe_truncate;
 
 /// Configuration for context eviction.
 #[derive(Debug, Clone)]
@@ -203,7 +204,7 @@ fn compute_retention_score(
 fn summarize_for_eviction(content: &str) -> String {
     let first_line = content.lines().next().unwrap_or("");
     let truncated = if first_line.len() > 80 {
-        format!("{}...", &first_line[..77])
+        format!("{}...", safe_truncate(first_line, 77))
     } else {
         first_line.to_string()
     };
@@ -382,6 +383,38 @@ mod tests {
         let summary = summarize_for_eviction(content);
         assert!(summary.contains("[evicted:"));
         assert!(summary.contains("fn main()"));
+    }
+
+    /// Regression test: a first line whose 77-byte truncation point lands in
+    /// the middle of a multi-byte UTF-8 character must not panic.
+    /// See sqz-mac-fork.md Phase 2 / context_evictor.rs:206.
+    #[test]
+    fn test_summarize_for_eviction_multibyte_utf8_does_not_panic() {
+        // 76 ASCII chars, then a 4-byte emoji straddling byte offset 77,
+        // then more content to keep the line over 80 bytes.
+        let prefix = "a".repeat(76);
+        let first_line = format!("{prefix}🎉 more text after the emoji to exceed eighty bytes");
+        let content = format!("{first_line}\nsecond line\n");
+
+        // Must not panic.
+        let summary = summarize_for_eviction(&content);
+        assert!(summary.contains("[evicted:"));
+        assert!(summary.contains("..."));
+    }
+
+    /// Regression test: multi-byte content at every possible boundary offset
+    /// near 77-80 bytes must never panic.
+    #[test]
+    fn test_summarize_for_eviction_never_panics_across_multibyte_boundaries() {
+        let samples = [
+            "中文测试内容中文测试内容中文测试内容中文测试内容中文测试内容中文测试内容",
+            "emoji test 🎉🎊🎈🎁🎀🥳 more emoji to push past eighty bytes total",
+            "café résumé naïve façade café résumé naïve façade café résumé naïve façade",
+        ];
+        for sample in samples {
+            let content = format!("{sample}\nsecond line\n");
+            let _ = summarize_for_eviction(&content); // must not panic
+        }
     }
 
     use proptest::prelude::*;
