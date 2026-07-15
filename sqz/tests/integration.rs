@@ -57,6 +57,34 @@ fn run_with_stdin(args: &[&str], stdin: &str) -> Output {
     child.wait_with_output().unwrap()
 }
 
+/// Like `run_with_stdin`, but with `HOME` overridden — used by the stats
+/// tests so they read/write an isolated `~/.sqz/sessions.db` instead of
+/// the real developer machine's.
+fn run_with_stdin_and_home(args: &[&str], stdin: &str, home: &std::path::Path) -> Output {
+    use std::io::Write;
+    let mut child = Command::new(sqz_bin())
+        .args(args)
+        .current_dir(workspace_root())
+        .env("HOME", home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn sqz");
+    child.stdin.as_mut().unwrap().write_all(stdin.as_bytes()).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// Like `run`, but with `HOME` overridden.
+fn run_with_home(args: &[&str], home: &std::path::Path) -> Output {
+    Command::new(sqz_bin())
+        .args(args)
+        .current_dir(workspace_root())
+        .env("HOME", home)
+        .output()
+        .expect("failed to run sqz binary")
+}
+
 fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).to_string()
 }
@@ -355,6 +383,49 @@ fn test_init_exits_zero() {
     // init may already be done; it should be idempotent
     let o = run(&["init"]);
     assert!(o.status.success(), "sqz init should exit 0: {}", stderr(&o));
+}
+
+// ── stats ─────────────────────────────────────────────────────────────────────
+//
+// Regression tests for upstream issue #18 ("stats stay on zero"). The
+// reported root cause was that a VS Code extension (a local preview
+// widget, not part of this fork) doesn't feed `~/.sqz/sessions.db` at
+// all -- only the CLI shell-hook path and the MCP server do. These
+// tests lock in that the two paths this fork actually ships (`sqz
+// compress` and the MCP `compress`/file tools) correctly populate
+// `sqz stats`, end-to-end against the real binary.
+
+#[test]
+fn test_stats_starts_at_zero_in_fresh_home() {
+    let home = tempfile::tempdir().unwrap();
+    let o = run_with_home(&["stats"], home.path());
+    assert!(o.status.success());
+    let out = stdout(&o);
+    assert!(out.contains("Compressions           0"), "fresh HOME should start at zero: {out}");
+}
+
+#[test]
+fn test_compress_updates_stats_issue_18() {
+    let home = tempfile::tempdir().unwrap();
+
+    // Sanity: stats start at zero in this isolated HOME.
+    let before = stdout(&run_with_home(&["stats"], home.path()));
+    assert!(before.contains("Compressions           0"), "precondition failed: {before}");
+
+    // Run a compression through the same path the shell hook uses:
+    // `sqz compress --cmd <label>` reading from stdin.
+    let compress_input = "On branch main\nnothing to commit, working tree clean\n";
+    let compress_out = run_with_stdin_and_home(
+        &["compress", "--cmd", "git status"],
+        compress_input,
+        home.path(),
+    );
+    assert!(compress_out.status.success(), "compress should exit 0: {}", stderr(&compress_out));
+
+    // Stats must now reflect exactly one compression.
+    let after = stdout(&run_with_home(&["stats"], home.path()));
+    assert!(after.contains("Compressions           1"), "stats should show 1 compression: {after}");
+    assert!(!after.contains("Compressions           0"), "stats must not still read zero: {after}");
 }
 
 // ── dashboard ─────────────────────────────────────────────────────────────────
