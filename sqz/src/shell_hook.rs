@@ -2,6 +2,13 @@
 ///
 /// Each variant knows how to detect its RC file and append the sqz hook
 /// function that pipes command output through `sqz compress`.
+///
+/// Note: none of these hook templates export `SQZ_ALLOW_LOSSY`. That's
+/// deliberate — the lossy subsystem (RLE / sliding-window dedup / entropy
+/// truncation / token pruning) must stay opt-in, so `cli_proxy`'s adaptive
+/// session-pressure escalation and the confidence router's auto-classification
+/// both stay capped to Default/Safe under a plain hook install. Users who
+/// want automatic lossy compression set `SQZ_ALLOW_LOSSY=1` themselves.
 
 use std::path::{Path, PathBuf};
 

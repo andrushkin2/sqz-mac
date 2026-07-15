@@ -32,6 +32,39 @@ impl CompressionMode {
     }
 }
 
+/// Returns `true` if the lossy compression subsystem is allowed to run
+/// automatically (i.e. without an explicit `--mode aggressive` request).
+///
+/// Reads the `SQZ_ALLOW_LOSSY` environment variable — set and non-empty
+/// and not `"0"` means "allowed". Default (unset) is `false`, matching
+/// the "lossy requires explicit opt-in" guarantee: by default, neither
+/// the confidence router's auto-classification nor `cli_proxy`'s
+/// session-pressure escalation may pick `Aggressive` on their own.
+/// Explicit `--mode aggressive` / `compress_with_mode(Aggressive)` always
+/// works regardless of this flag — this only gates *automatic* selection.
+pub fn lossy_allowed() -> bool {
+    match std::env::var("SQZ_ALLOW_LOSSY") {
+        Ok(v) => !v.is_empty() && v != "0",
+        Err(_) => false,
+    }
+}
+
+/// Caps an automatically-routed [`CompressionMode`] so it can never
+/// resolve to `Aggressive` unless lossy compression has been explicitly
+/// allowed (see [`lossy_allowed`]).
+///
+/// This is a pure function so it can be unit tested without touching
+/// process environment state (env-var tests are racy under parallel
+/// test execution). Callers pass in the already-evaluated
+/// `lossy_allowed` flag rather than calling it internally.
+pub fn gate_auto_mode(routed: CompressionMode, lossy_allowed: bool) -> CompressionMode {
+    if routed == CompressionMode::Aggressive && !lossy_allowed {
+        CompressionMode::Default
+    } else {
+        routed
+    }
+}
+
 /// Routes content to the appropriate compression mode.
 pub struct ConfidenceRouter {
     entropy_analyzer: EntropyAnalyzer,
@@ -273,5 +306,39 @@ mod tests {
         // PEM key must be > 100 chars to trigger routing
         let key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP\nQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz==\n-----END RSA PRIVATE KEY-----\n";
         assert_eq!(router.route(key), CompressionMode::Safe);
+    }
+
+    // --- gate_auto_mode: caps automatic Aggressive selection behind opt-in ---
+    // Pure-function tests only (no env var manipulation — env tests are
+    // racy under parallel execution; `lossy_allowed()` itself is a trivial
+    // one-line env read that doesn't need a dedicated unit test here).
+
+    #[test]
+    fn gate_auto_mode_downgrades_aggressive_when_not_allowed() {
+        assert_eq!(
+            gate_auto_mode(CompressionMode::Aggressive, false),
+            CompressionMode::Default,
+            "auto-routed Aggressive must downgrade to Default without explicit opt-in"
+        );
+    }
+
+    #[test]
+    fn gate_auto_mode_keeps_aggressive_when_allowed() {
+        assert_eq!(
+            gate_auto_mode(CompressionMode::Aggressive, true),
+            CompressionMode::Aggressive
+        );
+    }
+
+    #[test]
+    fn gate_auto_mode_passes_through_default_regardless_of_flag() {
+        assert_eq!(gate_auto_mode(CompressionMode::Default, false), CompressionMode::Default);
+        assert_eq!(gate_auto_mode(CompressionMode::Default, true), CompressionMode::Default);
+    }
+
+    #[test]
+    fn gate_auto_mode_passes_through_safe_regardless_of_flag() {
+        assert_eq!(gate_auto_mode(CompressionMode::Safe, false), CompressionMode::Safe);
+        assert_eq!(gate_auto_mode(CompressionMode::Safe, true), CompressionMode::Safe);
     }
 }

@@ -93,6 +93,13 @@ enum Command {
         /// Text to compress. If omitted, reads from stdin.
         text: Option<String>,
         /// Compression mode: safe (preserve everything), default (balanced), aggressive (max reduction).
+        ///
+        /// The default, `auto`, routes through the confidence router but
+        /// never runs the lossy subsystem (RLE / sliding-window dedup /
+        /// entropy truncation / token pruning) on its own — that requires
+        /// either `--mode aggressive` here, or setting `SQZ_ALLOW_LOSSY=1`
+        /// in the environment to let `auto` (and the shell hook's adaptive
+        /// session-pressure escalation) opt in automatically.
         #[arg(long, default_value = "auto")]
         mode: String,
         /// Show verifier confidence score alongside token reduction.

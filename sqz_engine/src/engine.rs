@@ -137,6 +137,17 @@ impl SqzEngine {
         // Step 1: Route — check content risk before compressing
         let mode = self.confidence_router.route(input);
 
+        // Step 1b: The router's auto-classification can pick Aggressive on
+        // its own (low-entropy/repetitive content), but auto-selection of
+        // the lossy subsystem is only allowed with explicit opt-in
+        // (SQZ_ALLOW_LOSSY=1) — otherwise it downgrades to Default. This
+        // is what makes bare `sqz compress` / `--mode auto` safe by
+        // construction: the *only* way to reach the lossy subsystem
+        // without opting in is an explicit `--mode aggressive` request,
+        // which goes through `compress_with_mode` and never touches this
+        // gate.
+        let mode = crate::confidence_router::gate_auto_mode(mode, crate::confidence_router::lossy_allowed());
+
         // Step 2: If Safe mode, skip aggressive pipeline and go straight to safe compress
         if mode == crate::confidence_router::CompressionMode::Safe {
             eprintln!("[sqz] fallback: safe mode — content classified as high-risk (stack trace / migration / secret)");
@@ -144,10 +155,11 @@ impl SqzEngine {
         }
 
         // Step 3: Compress with the configured pipeline. `mode` here is
-        // whatever the confidence router picked (Default or Aggressive —
-        // Safe already returned above), so the lossy subsystem only runs
-        // when the router explicitly classified this content as safe to
-        // compress aggressively.
+        // whatever the confidence router picked (Default, or Aggressive
+        // only if SQZ_ALLOW_LOSSY=1 — Safe already returned above), so the
+        // lossy subsystem only runs when the router explicitly classified
+        // this content as safe to compress aggressively AND the caller has
+        // opted in to automatic lossy compression.
         let mut result = pipeline.compress(input, &ctx, &preset, mode)?;
 
         // Step 4: Verify invariants
@@ -567,6 +579,77 @@ mod tests {
         let engine = SqzEngine::new().unwrap();
         let result = engine.compress(r#"{"name":"Alice","age":30}"#).unwrap();
         assert!(result.data.starts_with("TOON:"), "JSON should be TOON-encoded");
+    }
+
+    /// Phase 5 regression: `engine.compress()` (the "auto" / default path
+    /// used by bare `sqz compress` with no `--mode` flag) must never run
+    /// the lossy subsystem on its own, even on content the confidence
+    /// router would otherwise auto-classify as Aggressive (low-entropy /
+    /// repetitive). Without `SQZ_ALLOW_LOSSY=1` set, this must be gated
+    /// back down to Default. This test intentionally does not touch the
+    /// env var — it relies on the default (unset) test environment, since
+    /// mutating process env is racy under parallel test execution.
+    #[test]
+    fn test_compress_auto_never_runs_lossy_without_opt_in() {
+        assert!(
+            std::env::var("SQZ_ALLOW_LOSSY").is_err(),
+            "this test assumes SQZ_ALLOW_LOSSY is unset in the default test environment"
+        );
+        let engine = SqzEngine::new().unwrap();
+        // Low-entropy content — near-duplicate short lines that differ only
+        // by a small varying digit. Chosen (over a single fully-identical
+        // repeated line) because it survives the deterministic CondenseStage
+        // largely intact, so it still has enough length/structure left for
+        // the lossy subsystem to act on if it were allowed to run — see the
+        // `..._fixture_actually_triggers_lossy_stages_when_explicitly_requested`
+        // test below, which proves this same fixture is not vacuous.
+        let mut input = String::new();
+        for i in 0..300 {
+            input.push_str(&format!("000000000000000{}\n", i % 7));
+        }
+        // Sanity: confirm this fixture really is what the router would
+        // pick Aggressive for — otherwise this test passes vacuously.
+        assert_eq!(
+            engine.route_compression_mode(&input),
+            crate::confidence_router::CompressionMode::Aggressive,
+            "fixture should be classified Aggressive by the raw router (pre-gate)"
+        );
+
+        let result = engine.compress(&input).unwrap();
+        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+            assert!(
+                !result.stages_applied.contains(&lossy.to_owned()),
+                "engine.compress() ran lossy stage {:?} without SQZ_ALLOW_LOSSY opt-in: {:?}",
+                lossy,
+                result.stages_applied
+            );
+        }
+        assert!(!result.data.contains("[→L"), "dangling back-reference in output: {}", result.data);
+    }
+
+    /// Companion to `test_compress_auto_never_runs_lossy_without_opt_in`:
+    /// proves that fixture isn't passing vacuously (i.e. it's not just
+    /// content the lossy subsystem would never touch anyway). Uses
+    /// `compress_with_mode(Aggressive)`, which bypasses the router/gate
+    /// entirely, so it needs no env var mutation — it's a direct, explicit
+    /// request that must always work regardless of `SQZ_ALLOW_LOSSY`.
+    #[test]
+    fn test_low_entropy_fixture_actually_triggers_lossy_stages_when_explicitly_requested() {
+        let engine = SqzEngine::new().unwrap();
+        let mut input = String::new();
+        for i in 0..300 {
+            input.push_str(&format!("000000000000000{}\n", i % 7));
+        }
+        let result = engine
+            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Aggressive)
+            .unwrap();
+        assert!(
+            result.stages_applied.iter().any(|s| {
+                s == "rle" || s == "sliding_window_dedup" || s == "entropy_truncate" || s == "token_prune"
+            }),
+            "fixture should trigger at least one lossy stage under explicit Aggressive mode, got: {:?}",
+            result.stages_applied
+        );
     }
 
     #[test]

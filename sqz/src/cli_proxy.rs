@@ -313,6 +313,15 @@ impl CliProxy {
     /// Internal: run `output` through the engine pipeline.
     /// Uses adaptive compression: escalates to aggressive mode when
     /// session token pressure is high (research-backed: ACC-RAG, ACON).
+    ///
+    /// This automatic escalation only fires when the lossy subsystem has
+    /// been explicitly opted into via `SQZ_ALLOW_LOSSY=1` (see
+    /// `sqz_engine::lossy_allowed`). Without that opt-in, pressure alone
+    /// never selects `Aggressive` — it falls through to `self.engine.compress`,
+    /// which is itself capped to Default/Safe by the same gate. This keeps
+    /// "lossy compression requires explicit opt-in" true end-to-end: neither
+    /// the confidence router's auto-classification nor this pressure-based
+    /// escalation can reach the lossy subsystem on their own.
     fn compress_output(
         &self,
         _cmd: &str,
@@ -327,7 +336,7 @@ impl CliProxy {
         // Thresholds based on typical 200k context windows:
         // >80k tokens in 30min = high pressure → aggressive mode
         // >120k tokens in 30min = critical → aggressive mode
-        if pressure > 80_000 {
+        if pressure > 80_000 && sqz_engine::lossy_allowed() {
             eprintln!("[sqz] adaptive: high session pressure ({} tokens/30min), escalating compression", pressure);
             self.engine.compress_with_mode(output, sqz_engine::CompressionMode::Aggressive)
         } else {

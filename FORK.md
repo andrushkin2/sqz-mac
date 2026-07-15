@@ -28,6 +28,13 @@ efforts (platform pruning does not by itself fix correctness issues):
      because `CompressionMode` was never threaded into `pipeline.compress()`;
      this fork gates the lossy subsystem behind an explicit opt-in
      (`--mode aggressive`), default OFF.
+   - That opt-in gate had two gaps: the confidence router could still
+     auto-select `Aggressive` for low-entropy content under `--mode auto`
+     (the default), and `cli_proxy`'s adaptive session-pressure escalation
+     could independently force `Aggressive` regardless of content. Both are
+     now capped behind `SQZ_ALLOW_LOSSY=1` — auto-routing and pressure
+     escalation only reach the lossy subsystem with explicit opt-in;
+     `--mode aggressive` is unaffected.
    - Dangling `[→LN]` RLE back-references with no expand mechanism.
    - Compound shell commands (`&&`, `|`, `>`, `;`) were skipped entirely by
      the compression hook instead of having their sub-commands compressed.

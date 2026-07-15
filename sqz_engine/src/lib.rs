@@ -126,7 +126,7 @@ pub use api_proxy::{compress_request, parse_http_request, build_http_response, A
 pub use ast_parser::{AstParser, ClassDefinition, CodeSummary, FunctionSignature, ImportDecl, TypeDeclaration};
 pub use bpe_compressor::{bpe_compress, BpeConfig, BpeResult};
 pub use compression_quality::{measure_quality, format_quality_report, CompressionQuality, QualityGrade};
-pub use confidence_router::{ConfidenceRouter, CompressionMode};
+pub use confidence_router::{ConfidenceRouter, CompressionMode, lossy_allowed, gate_auto_mode};
 pub use context_evictor::{evict, should_evict, ContextItem, EvictionConfig, EvictionResult};
 pub use cmd_formatters::format_command;
 pub use delta_encoder::{DeltaConfig, DeltaEncoder, DeltaResult};
