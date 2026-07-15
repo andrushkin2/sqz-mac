@@ -201,14 +201,14 @@ mod shell_hook_tests {
         assert!(content.contains("[meta]"));
     }
 
-    /// All four shell variants produce non-empty hook scripts.
+    /// All shell variants produce non-empty hook scripts.
     #[test]
     fn test_all_shell_variants_have_scripts() {
         for hook in &[
             ShellHook::Bash,
             ShellHook::Zsh,
             ShellHook::Fish,
-            ShellHook::PowerShell,
+            ShellHook::Nushell,
         ] {
             assert!(
                 !hook.hook_script().is_empty(),
@@ -228,7 +228,7 @@ mod shell_hook_tests {
             ShellHook::Bash,
             ShellHook::Zsh,
             ShellHook::Fish,
-            ShellHook::PowerShell,
+            ShellHook::Nushell,
         ]
         .iter()
         .map(|h| h.rc_path())

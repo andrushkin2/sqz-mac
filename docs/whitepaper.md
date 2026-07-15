@@ -6,6 +6,14 @@
 
 ---
 
+> This whitepaper describes the upstream `sqz` project as published by its
+> author. This repository is a personal, macOS-only fork that removes the
+> Browser Extension and IDE Extension integration surfaces mentioned below
+> and gates the lossy compression techniques behind explicit opt-in — see
+> [FORK.md](FORK.md) for what differs from the description here.
+
+---
+
 ## Abstract
 
 Large Language Model (LLM) coding agents process tens of thousands of tokens per session through tool outputs — shell commands, file reads, test results, and build logs. These outputs enter the context window raw, consuming budget that could serve reasoning. We present **sqz**, a transparent compression layer that operates *before* tool outputs are injected into context. sqz combines domain-specific structural formatters, content-addressed deduplication, adaptive pressure-aware compression, and entropy-based safety routing to achieve a mean 24.7% reduction on first-pass content and up to 92% savings on repeated reads — without requiring model fine-tuning, prompt modification, or changes to the agent's workflow. Measured across 3,003 real compressions in production agentic sessions, sqz saved 178,442 tokens while maintaining full semantic fidelity on downstream tasks.

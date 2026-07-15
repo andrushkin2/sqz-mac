@@ -1,11 +1,15 @@
 #!/usr/bin/env sh
-# sqz — universal context intelligence layer
+# sqz-mac — personal macOS-only fork of sqz's context intelligence layer
 # Curl-based install script.
-# Requirement 16.2: curl-based install script.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.sh | sh -s -- --version 0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/andrushkin2/sqz-mac/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/andrushkin2/sqz-mac/main/install.sh | sh -s -- --version 0.1.0
+#
+# Note: this fork does not currently publish release binaries, so this
+# script has nothing to download yet. Build from source instead:
+#   cargo build --release
+# This script is kept in case a release is cut later.
 #
 # Installs two binaries into $SQZ_INSTALL_DIR (default /usr/local/bin):
 #   * sqz     — the CLI (required)
@@ -17,7 +21,7 @@
 
 set -eu
 
-REPO="ojuschugh1/sqz"
+REPO="andrushkin2/sqz-mac"
 INSTALL_DIR="${SQZ_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${1:-latest}"
 

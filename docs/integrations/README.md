@@ -34,17 +34,15 @@ See [`level2/`](./level2/) for platform-specific guides.
 
 ### Level 3 — Native / Deep Integration
 
-Native extensions for VS Code, JetBrains, Chrome (5 web UIs), and API proxy mode.
-
 | Platform | Guide |
 |---|---|
-| VS Code Marketplace | [`level3/vscode-marketplace.md`](./level3/vscode-marketplace.md) |
-| JetBrains Marketplace | [`level3/jetbrains-marketplace.md`](./level3/jetbrains-marketplace.md) |
-| Chrome Web Store | [`level3/chrome-web-store.md`](./level3/chrome-web-store.md) |
-| Firefox Add-ons | [`level3/firefox-addons.md`](./level3/firefox-addons.md) |
 | API proxy (OpenAI, Anthropic, Google AI) | [`level3/api-proxy.md`](./level3/api-proxy.md) |
 
-See [`level3/`](./level3/) for publishing guides and proxy configuration.
+See [`level3/`](./level3/) for proxy configuration.
+
+> Note: this fork removed the browser extension (Chrome/Firefox) and IDE
+> plugin (VS Code/JetBrains) native integrations that upstream `sqz` offers
+> — see [FORK.md](../../FORK.md). Use Level 1/2 shell hooks or MCP instead.
 
 ---
 

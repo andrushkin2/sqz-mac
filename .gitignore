@@ -26,12 +26,6 @@ __pycache__/
 *.egg-info/
 build/
 
-# JetBrains plugin
-jetbrains-plugin/build/
-jetbrains-plugin/.gradle/
-jetbrains-plugin/.intellijPlatform/
-jetbrains-plugin/bin/
-
 # SQLite databases (test artifacts)
 *.db
 *.db-journal
@@ -49,12 +43,11 @@ jetbrains-plugin/bin/
 *.crate
 
 # Build artifacts
-*.xpi
 sqz-source.zip
 .audit-external/
 
-# Gradle wrapper jar (downloaded on first run by gradlew script)
-jetbrains-plugin/gradle/wrapper/gradle-wrapper.jar
+# Generated rustdoc (rebuilt + published by .github/workflows/docs.yml)
+docs/doc/
 
 # sqz init outputs (created when testing sqz in its own workspace).
 # These are meant to be written into USER projects that install sqz,

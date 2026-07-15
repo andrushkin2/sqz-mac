@@ -1,4 +1,4 @@
-/// Shell hook installation for Bash, Zsh, Fish, Nushell, and PowerShell.
+/// Shell hook installation for Bash, Zsh, Fish, and Nushell.
 ///
 /// Each variant knows how to detect its RC file and append the sqz hook
 /// function that pipes command output through `sqz compress`.
@@ -83,25 +83,6 @@ def sqz_run [...args: string] {
 # sqz — end of auto-installed block
 "#;
 
-const POWERSHELL_HOOK: &str = r#"
-# sqz — context intelligence layer (auto-installed)
-# Dedup (`§ref:HASH§` tokens) is off by default: some models loop on refs
-# they can't parse. Remove this line (or set to 0) to opt back in.
-$env:SQZ_NO_DEDUP = "1"
-function Invoke-SqzRun {
-    param([string[]]$Command)
-    $env:SQZ_CMD = ($Command -join " ")
-    & @Command 2>&1 | sqz compress
-}
-Set-Alias sqz_run Invoke-SqzRun
-function Invoke-SqzSudo {
-    param([string[]]$Command)
-    $env:SQZ_CMD = "sudo " + ($Command -join " ")
-    Start-Process -Verb RunAs -FilePath $Command[0] -ArgumentList $Command[1..] 2>&1 | sqz compress
-}
-# sqz — end of auto-installed block
-"#;
-
 // ── ShellHook enum ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +91,6 @@ pub enum ShellHook {
     Zsh,
     Fish,
     Nushell,
-    PowerShell,
 }
 
 impl ShellHook {
@@ -130,8 +110,6 @@ impl ShellHook {
             ShellHook::Fish
         } else if shell.contains("nu") || shell.contains("nushell") {
             ShellHook::Nushell
-        } else if shell.contains("pwsh") || shell.contains("powershell") {
-            ShellHook::PowerShell
         } else {
             ShellHook::Bash
         }
@@ -151,7 +129,6 @@ impl ShellHook {
                 .join(".config")
                 .join("nushell")
                 .join("config.nu"),
-            ShellHook::PowerShell => powershell_profile_path(),
         }
     }
 
@@ -162,7 +139,6 @@ impl ShellHook {
             ShellHook::Zsh => ZSH_HOOK,
             ShellHook::Fish => FISH_HOOK,
             ShellHook::Nushell => NUSHELL_HOOK,
-            ShellHook::PowerShell => POWERSHELL_HOOK,
         }
     }
 
@@ -220,17 +196,6 @@ fn home_dir() -> PathBuf {
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn powershell_profile_path() -> PathBuf {
-    // $PROFILE is typically Documents\PowerShell\Microsoft.PowerShell_profile.ps1
-    if let Ok(profile) = std::env::var("PROFILE") {
-        return PathBuf::from(profile);
-    }
-    let home = home_dir();
-    home.join("Documents")
-        .join("PowerShell")
-        .join("Microsoft.PowerShell_profile.ps1")
 }
 
 /// Append `script` to `path` unless `sentinel` is already present.
@@ -418,14 +383,8 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_powershell() {
-        assert_eq!(ShellHook::detect_from_str("pwsh"), ShellHook::PowerShell);
-        assert_eq!(ShellHook::detect_from_str("/usr/bin/powershell"), ShellHook::PowerShell);
-    }
-
-    #[test]
     fn test_all_shells_have_sudo_or_equivalent() {
-        // Bash, Zsh, Fish, PowerShell all have sudo passthrough
+        // Bash, Zsh, Fish all have sudo passthrough
         // Nushell doesn't have sudo in the same way — that's expected
         for hook in &[ShellHook::Bash, ShellHook::Zsh, ShellHook::Fish] {
             assert!(
@@ -556,7 +515,6 @@ mod tests {
             ShellHook::Zsh,
             ShellHook::Fish,
             ShellHook::Nushell,
-            ShellHook::PowerShell,
         ]
         .iter()
         .map(|h| h.rc_path())

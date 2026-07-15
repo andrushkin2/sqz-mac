@@ -1,5 +1,9 @@
 # sqz vs rtk — Token Savings Benchmark
 
+> This document describes the upstream `sqz` project, including browser/IDE
+> integrations this fork does not include (see [FORK.md](../FORK.md)). The
+> core compression comparisons below still apply to this fork's engine.
+
 A reproducible comparison of session-level token consumption between sqz and rtk across realistic AI coding workflows.
 
 ## Methodology

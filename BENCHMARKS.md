@@ -4,7 +4,13 @@ Reproducible benchmark results from the sqz compression engine.
 All measurements use the `sqz compress` CLI on the inputs shown.
 Token counts use the `chars / 4` approximation (GPT-style).
 
-**Last updated:** May 2026 | **sqz version:** 1.2.0 | **Platform:** macOS aarch64
+**Last updated:** July 2026 | **Fork:** sqz-mac (based on upstream 1.3.0) | **Platform:** macOS aarch64
+
+All figures below come from the always-on deterministic pipeline (per-command
+formatters, `condense`, TOON/null-stripping, diff folding) and dedup — none of
+this fork's changes affect them. The lossy subsystem (RLE, sliding-window
+dedup, entropy truncation, token pruning) is opt-in only (`--mode aggressive`
+or `SQZ_ALLOW_LOSSY=1`) and is not reflected here — see [FORK.md](FORK.md).
 
 ---
 
@@ -179,15 +185,15 @@ Fallback rate (safe mode triggered): < 5% on typical coding session content.
 Run these benchmarks yourself:
 
 ```sh
-cargo install sqz-cli
+cargo build --release
 cargo test -p sqz-engine benchmarks -- --nocapture
 ```
 
 Or run the full benchmark suite:
 
 ```sh
-git clone https://github.com/ojuschugh1/sqz
-cd sqz
+git clone https://github.com/andrushkin2/sqz-mac
+cd sqz-mac
 cargo test --workspace
 ```
 

@@ -5,8 +5,8 @@ Thanks for your interest in contributing. Here's how to get started.
 ## Setup
 
 ```sh
-git clone https://github.com/ojuschugh1/sqz.git
-cd sqz
+git clone https://github.com/andrushkin2/sqz-mac.git
+cd sqz-mac
 cargo test --workspace
 ```
 
@@ -14,14 +14,13 @@ If all tests pass, you're ready.
 
 ## Building
 
-The workspace has four crates:
+The workspace has three crates:
 
 | Crate | What it is |
 |---|---|
 | `sqz_engine` | Core compression library — all the logic lives here |
 | `sqz` | CLI binary (`sqz compress`, `sqz init`, etc.) |
 | `sqz-mcp` | MCP server (stdio/SSE transport) |
-| `sqz-wasm` | WASM build for browser extensions |
 
 Build everything:
 
@@ -105,7 +104,7 @@ cargo test -p sqz-engine prop_
 
 ## Architecture Rules
 
-- All compression logic lives in `sqz_engine`. The CLI, MCP server, and WASM crate are thin adapters — they should not contain compression logic
+- All compression logic lives in `sqz_engine`. The CLI and MCP server are thin adapters — they should not contain compression logic
 - No network requests from the core engine
 - No telemetry, no analytics, no crash reports
 - Property-based tests (proptest) for all correctness properties

@@ -24,29 +24,21 @@
 </p>
 
 <p align="center">
-  <a href="https://thenextgentechinsider.com/pulse/sqz-tool-cuts-llm-token-use-by-92-for-file-heavy-ai-tasks"><img src="https://img.shields.io/badge/%231_Featured-NextGen_Tech_Insider-ff6600?style=for-the-badge&logo=newspaper&logoColor=white" alt="Featured"></a>
-</p>
-
-<p align="center">
-  <a href="https://crates.io/crates/sqz-cli"><img src="https://img.shields.io/crates/v/sqz-cli?logo=rust&logoColor=white&label=crates.io&color=e6522c" alt="Crates.io"></a>
-  <a href="https://www.npmjs.com/package/sqz-cli"><img src="https://img.shields.io/npm/v/sqz-cli?logo=npm&logoColor=white&label=npm&color=cb3837" alt="npm"></a>
-  <a href="https://pypi.org/project/sqz/"><img src="https://img.shields.io/pypi/v/sqz?logo=python&logoColor=white&label=PyPI&color=3775a9" alt="PyPI"></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=ojuschugh1.sqz"><img src="https://img.shields.io/badge/VS%20Code-Marketplace-007acc?logo=visual-studio-code&logoColor=white" alt="VS Code"></a>
-  <a href="https://addons.mozilla.org/en-US/firefox/addon/sqz-context-compression/"><img src="https://img.shields.io/badge/Firefox-Add--on-ff7139?logo=firefox-browser&logoColor=white" alt="Firefox"></a>
-  <a href="https://plugins.jetbrains.com/plugin/31240-sqz--context-intelligence/"><img src="https://img.shields.io/badge/JetBrains-Plugin-000000?logo=jetbrains&logoColor=white" alt="JetBrains"></a>
-  <a href="https://discord.gg/j8EEyH5dSB"><img src="https://img.shields.io/discord/1493251029075235076?logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord"></a>
-  <a href="https://github.com/ojuschugh1/homebrew-sqz"><img src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" alt="Homebrew"></a>
-</p>
-
-<p align="center">
   <a href="#install">Install</a> ·
   <a href="#how-it-works">How It Works</a> ·
   <a href="#supported-tools">Supported Tools</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="https://discord.gg/j8EEyH5dSB">Discord</a>
+  <a href="FORK.md">Fork Notice</a>
 </p>
 
 ---
+
+> **This is a personal, macOS-only fork** of [`sqz`](https://github.com/ojuschugh1/sqz) by
+> Ojus Chugh. It removes non-macOS packaging (Windows installer, browser/IDE extensions,
+> WASM build, Python wrapper) and fixes several correctness bugs found during review
+> (UTF-8 panics, safe mode not actually being lossless, dangling RLE back-references,
+> compound shell commands skipped entirely). See [FORK.md](FORK.md) for details and the
+> full list of changes from upstream.
 
 sqz compresses command output before it reaches your LLM. Single Rust binary, zero config.
 
@@ -114,36 +106,20 @@ Single-command compression ranges from 2–58% depending on content. Repeated re
 
 ## Install
 
-**Prebuilt binaries** (no compiler required — works on every platform):
+This fork is macOS-only and not published to crates.io/npm/Homebrew. Build it from source:
 
 ```sh
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.sh | sh
-
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.ps1 | iex
-
-# Any platform via npm
-npm install -g sqz-cli
-
-# macOS / Linux via Homebrew
-brew tap ojuschugh1/sqz
-brew install sqz
+git clone https://github.com/andrushkin2/sqz-mac.git
+cd sqz-mac
+cargo build --release
 ```
 
-**Build from source via Cargo:**
+This builds `target/release/sqz` (CLI) and `target/release/sqz-mcp` (MCP server).
+Requires Xcode Command Line Tools (`xcode-select --install`) for the C toolchain.
+Put `target/release` on your `PATH`, or reference the binaries by full path.
 
-```sh
-cargo install sqz-cli sqz-mcp
-```
-
-`sqz-cli` provides the `sqz` binary; `sqz-mcp` provides the MCP server. `sqz-engine` is a library dependency — it compiles automatically and does not need to be installed separately.
-
-**Build from source** (`cargo install sqz-cli`) works too, but needs a C toolchain:
-
-- Linux: `build-essential` (apt) or equivalent
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- **Windows: Visual Studio Build Tools with the "Desktop development with C++" workload.** Without these, `cargo install` fails with `linker link.exe not found`. If you don't already have them, use the PowerShell or npm install above instead.
+**Prebuilt binaries** — `install.sh` is kept for convenience if you ever publish a
+release for this fork (`REPO=andrushkin2/sqz-mac`); until then, build from source above.
 
 Then initialize:
 
@@ -250,10 +226,7 @@ What doesn't get compressed:
 | Gemini CLI | BeforeTool hook (transparent) | `sqz init` |
 | Kiro | PreToolUse hook (transparent) | `sqz init` |
 | OpenCode | TypeScript plugin (transparent) | `sqz init` |
-| VS Code | [Extension](https://marketplace.visualstudio.com/items?itemName=ojuschugh1.sqz) | Install from Marketplace |
-| JetBrains | [Plugin](https://plugins.jetbrains.com/plugin/31240-sqz--context-intelligence/) | Install from Marketplace |
-| Chrome | Browser extension | ChatGPT, Claude.ai, Gemini, Grok, Perplexity |
-| [Firefox](https://addons.mozilla.org/en-US/firefox/addon/sqz-context-compression/) | Browser extension | Same sites |
+| Codex | AGENTS.md guidance + `sqz-mcp` | `sqz init` |
 
 ## CLI
 
@@ -385,6 +358,9 @@ Stats are stored locally in SQLite under `~/.sqz/sessions.db` — nothing leaves
 3. **Dedup cache** — SHA-256 content hash, persistent across sessions. Second read = 13-token reference.
 4. **JSON pipeline** — strip nulls → project out debug fields → flatten → collapse arrays → TOON encoding (lossless compact format)
 5. **Safe mode** — stack traces, secrets, migrations detected by entropy analysis and routed through with 0% compression
+6. **Lossy stages are opt-in** — RLE, sliding-window dedup, entropy-weighted truncation, and
+   token pruning never run in `default`/`auto`/`safe` mode. They only run with an explicit
+   `--mode aggressive`, or when `SQZ_ALLOW_LOSSY=1` is set (see [FORK.md](FORK.md))
 
 For the full technical details, see [docs/](docs/).
 
@@ -417,8 +393,8 @@ default_window_size = 200000
 ## Development
 
 ```sh
-git clone https://github.com/ojuschugh1/sqz.git
-cd sqz
+git clone https://github.com/andrushkin2/sqz-mac.git
+cd sqz-mac
 cargo test --workspace
 cargo build --release
 ```
@@ -429,17 +405,8 @@ cargo build --release
 
 ## Links
 
+- [Fork Notice](FORK.md)
 - [White Paper: Pre-Injection Context Compression](docs/whitepaper.md)
 - [Benchmark: sqz vs rtk](docs/benchmark-vs-rtk.md)
-- [Discord](https://discord.gg/j8EEyH5dSB)
 - [Changelog](CHANGELOG.md)
-
-## Star History
-
-<a href="https://star-history.com/#ojuschugh1/sqz&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ojuschugh1/sqz&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ojuschugh1/sqz&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ojuschugh1/sqz&type=Date" width="600" />
- </picture>
-</a>
+- [Upstream project](https://github.com/ojuschugh1/sqz)

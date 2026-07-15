@@ -8,7 +8,7 @@ All Level 2 platforms follow the same two-step setup: install shell hooks, then 
 sqz init
 ```
 
-This installs the sqz hook into your shell profile and creates default presets. Supports Bash, Zsh, Fish, and PowerShell.
+This installs the sqz hook into your shell profile and creates default presets. Supports Bash, Zsh, Fish, and Nushell (this fork drops PowerShell/Windows support — see [FORK.md](../../../FORK.md)).
 
 ## Step 2 — Add MCP config
 

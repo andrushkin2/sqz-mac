@@ -5,6 +5,64 @@ All notable changes to sqz will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## sqz-mac fork
+
+Entries below this heading are specific to [`sqz-mac`](https://github.com/andrushkin2/sqz-mac),
+a personal macOS-only fork maintained by Andrei Kozyakov, forked from upstream `sqz` at commit
+`7fc171872ba24871d16a14133ec13f2840c5abb9` (after 1.3.0). See [FORK.md](FORK.md) for full scope.
+Everything under "Upstream history" below is unmodified upstream `sqz` history.
+
+### Fixed
+
+- **Safe mode wasn't actually safe** — `CompressionMode` was never threaded into
+  `pipeline.compress()`, so the lossy subsystem (RLE, sliding-window dedup,
+  entropy-weighted truncation, token pruning) ran unconditionally regardless of
+  `--mode`. `--mode safe` could still truncate and structurally corrupt real
+  source files. The lossy subsystem is now gated: it only runs under an explicit
+  `--mode aggressive`, or with `SQZ_ALLOW_LOSSY=1` set. Default (`safe`/`default`/
+  `auto`) modes never run it.
+- **Auto-routing could still reach the lossy subsystem without opt-in** — the
+  confidence router could auto-select `Aggressive` for low-entropy content under
+  `--mode auto` (the default), and `cli_proxy`'s adaptive session-pressure
+  escalation could independently force `Aggressive` regardless of content or
+  explicit mode. Both paths are now capped behind `SQZ_ALLOW_LOSSY=1` via
+  `confidence_router::gate_auto_mode()`; `--mode aggressive` is unaffected.
+- **UTF-8 slicing panics** on multi-byte character boundaries in
+  `context_evictor.rs` (`summarize_for_eviction`, used by `sqz compact`) and
+  `kv_cache_optimizer.rs` (`compress_with_sinks` / `compress_with_custom_sinks`).
+  Both now use a shared `safe_truncate`/`safe_split_at` helper that finds the
+  nearest valid char boundary instead of raw byte slicing.
+- **Dangling `[→LN]` RLE back-references** — `rle_compressor.rs`'s sliding-window
+  dedup emits back-references using line numbers from *before* later stages
+  (entropy truncation) can remove/shift lines, with no expand mechanism (unlike
+  `§ref:hash§` dedup, which `sqz expand` can resolve). Fixed as part of gating
+  the lossy subsystem behind opt-in, since it's the primary path that produced
+  these references without user awareness.
+- **Compound shell commands were skipped entirely** — `opencode_plugin.rs` and
+  the tool-hook rewriter skipped compression for any command containing `&&`,
+  `|`, `>`, or `;` (confirmed with `npm install && npm test`, `cat file | grep
+  foo`, `npm install > out.log` all passing through unmodified). The OpenCode
+  plugin now splits compound commands on shell operators and compresses each
+  sub-command's output individually instead of abandoning compression for the
+  whole line, while leaving redirect targets untouched.
+
+### Removed
+
+- Non-macOS packaging and distribution surface with no role in a personal
+  macOS build: Windows installer (`install.ps1`), Dockerfile, VS Code
+  extension, JetBrains plugin, Chrome/Firefox browser extensions, npm package,
+  Python wrapper (`pyproject.toml`), and the `sqz-wasm` crate (removed from the
+  Cargo workspace).
+- PowerShell shell-hook and completion support (`ShellHook::PowerShell`,
+  `sqz.ps1`) — bash, zsh, fish, and Nushell remain supported.
+- Non-shell completion scripts beyond fish/nu/bash/zsh.
+- Generated rustdoc snapshot (`docs/doc/`) from version control — it's rebuilt
+  and published by `.github/workflows/docs.yml` on every push, so committing
+  it was redundant (and had gone stale, still referencing the removed
+  `sqz-wasm` crate).
+
+## Upstream history
+
 ## [1.3.0] — 2026-06-21
 
 ### Added
