@@ -3,7 +3,6 @@ members = [
     "sqz_engine",
     "sqz",
     "sqz-mcp",
-    "sqz-wasm",
 ]
 resolver = "2"
 

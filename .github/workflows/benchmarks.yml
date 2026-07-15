@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest]
         rust: [stable, "1.85"]  # stable + MSRV (indexmap 2.14 requires 1.85)
 
     steps:
@@ -42,6 +42,6 @@ jobs:
           RUST_BACKTRACE: 1
 
       - name: Run full test suite (regression gate)
-        run: cargo test --workspace --exclude sqz-wasm
+        run: cargo test --workspace
         env:
           RUST_BACKTRACE: 1

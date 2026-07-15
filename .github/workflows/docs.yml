@@ -24,7 +24,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build docs
-        run: cargo doc --workspace --no-deps --document-private-items --exclude sqz-wasm
+        run: cargo doc --workspace --no-deps --document-private-items
 
       - name: Add redirect from root
         run: |
