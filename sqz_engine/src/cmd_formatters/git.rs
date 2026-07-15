@@ -355,6 +355,45 @@ mod tests {
         assert_eq!(format_git_fetch(""), "ok: up-to-date");
     }
 
+    /// Documents upstream issue #30: `format_git_status` keys off English
+    /// labels ("modified:", "new file:", "Untracked files:", "nothing to
+    /// commit"). Localized git output (e.g. `LANG=it_IT`) doesn't match any
+    /// of those long-format labels, so the parser falls through to the
+    /// `git status -s` short-format heuristic — which misreads arbitrary
+    /// bytes at column 0-1 of each localized line as status codes and
+    /// garbles the text. This test reproduces the exact corruption (a
+    /// line like "Modifiche in stage:" gets mangled into "M ifiche in
+    /// stage:") to document the bug this fixture exists to catch.
+    ///
+    /// The actual fix lives at the hook layer (`tool_hooks.rs` /
+    /// `opencode_plugin.rs`): commands are executed with `LC_ALL=C` so this
+    /// formatter only ever sees English git output in practice. This test
+    /// is a tripwire — if it ever stops failing this way, double-check the
+    /// hook-layer fix hasn't silently regressed and someone "fixed" this
+    /// formatter to (wrongly) treat it as expected behavior.
+    #[test]
+    fn test_git_status_localized_output_is_corrupted_without_c_locale_issue_30() {
+        // Italian locale git status --long output (modificato: = "modified:")
+        let italian_output = "Sul branch main\nModifiche in stage:\n\
+            \t(usa \"git restore --staged <file>...\" per rimuovere lo stage)\n\
+            \tmodificato:  src/main.rs\n";
+        let result = format_git_status(italian_output);
+        // Must NOT be misreported as clean — that would be the worst
+        // outcome (silently hiding real changes from the agent).
+        assert_ne!(
+            result, "clean",
+            "localized git output must never be misclassified as clean: {result}"
+        );
+        // Demonstrates the actual corruption: the short-status fallback
+        // misparses "Modifiche in stage:" as "M" + "ifiche in stage:".
+        // This is the bug issue #30 reports — mitigated by forcing
+        // LC_ALL=C before this formatter ever runs, not by this parser.
+        assert!(
+            result.contains("ifiche in stage"),
+            "expected the known short-format misparse corruption, got: {result}"
+        );
+    }
+
     #[test]
     fn test_git_fetch_strips_noise() {
         let output = "remote: Counting objects: 5, done.\nremote: Compressing objects: 100% (3/3), done.\nremote: Total 5\nReceiving objects: 100%\nResolving deltas: 100%\nFrom github.com:user/repo\n   abc..def  main -> origin/main\n";

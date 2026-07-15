@@ -255,9 +255,25 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
     // hook (they only fired in unit tests / the MCP path). The command is a
     // simple command here (compound commands bailed out above via
     // `has_shell_operators`), so quoting it as one arg is safe.
+    //
+    // Issue #30: `git`'s porcelain-ish human output (`git status`, `git log`,
+    // etc.) is localized — on a system with e.g. `LANG=it_IT.UTF-8` git
+    // emits "modificato:" instead of "modified:", which the English-keyed
+    // formatters in `cmd_formatters/git.rs` don't recognize, so the output
+    // falls through unformatted (or worse, gets misclassified). Force
+    // `LC_ALL=C` for the *execution* of git commands only — this is a
+    // POSIX inline env-var prefix, safe here because the fork's supported
+    // shells are bash/zsh/sh (Windows/PowerShell/cmd.exe hook paths were
+    // removed). The label passed to `--cmd` stays the original command so
+    // formatter dispatch (`git status` → `format_git_status`) is unaffected.
+    let exec_command = if base_cmd == "git" {
+        format!("LC_ALL=C {}", command)
+    } else {
+        command.to_string()
+    };
     let rewritten = format!(
         "{} 2>&1 | sqz compress --cmd {}",
-        command,
+        exec_command,
         shell_escape(command),
     );
 
@@ -1522,6 +1538,50 @@ mod tests {
         assert!(parsed.get("decision").is_none(), "Claude Code format should not have top-level decision");
         assert!(parsed.get("permission").is_none(), "Claude Code format should not have top-level permission");
         assert!(parsed.get("continue").is_none(), "Claude Code format should not have top-level continue");
+    }
+
+    /// Regression test for upstream issue #30: `git status`/`git log`/etc.
+    /// output is localized, so a non-English `LANG`/`LC_ALL` makes git emit
+    /// labels (e.g. "modificato:" instead of "modified:") that the English-
+    /// keyed formatters in `cmd_formatters/git.rs` don't recognize. The hook
+    /// rewrite must force `LC_ALL=C` when executing git so output is always
+    /// English, regardless of the user's shell locale.
+    #[test]
+    fn test_process_hook_forces_c_locale_for_git_issue_30() {
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"git status"}}"#;
+        let result = process_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.starts_with("LC_ALL=C git status"),
+            "git commands must be executed with LC_ALL=C to force English output: {cmd}"
+        );
+        // The --cmd label must still be the original, unprefixed command so
+        // subcommand-routed formatters (format_git_status) keep dispatching.
+        assert!(
+            cmd.contains("--cmd 'git status'"),
+            "the --cmd label must stay the original command, not the LC_ALL-prefixed one: {cmd}"
+        );
+    }
+
+    /// Non-git commands must not get the LC_ALL=C prefix — it's unnecessary
+    /// overhead and could theoretically confuse tools that key off locale
+    /// env vars in their own output.
+    #[test]
+    fn test_process_hook_does_not_force_locale_for_non_git() {
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"cargo test"}}"#;
+        let result = process_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            !cmd.contains("LC_ALL=C"),
+            "only git commands should get the LC_ALL=C prefix: {cmd}"
+        );
+        assert!(cmd.starts_with("cargo test"), "command should be unmodified: {cmd}");
     }
 
     #[test]

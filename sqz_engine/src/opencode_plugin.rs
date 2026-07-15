@@ -912,9 +912,22 @@ pub fn process_opencode_hook(input: &str) -> Result<String> {
     // prefix. Ensures the rewrite works in PowerShell and cmd.exe on
     // Windows (OpenCode Desktop's default bash-tool shell when $SHELL
     // is unset or set to a Windows shell), not just POSIX shells.
+    //
+    // Issue #30: force `LC_ALL=C` when executing `git` commands so its
+    // human-readable output (`git status`, `git log`, etc.) is always
+    // English, matching the keys the formatters in `cmd_formatters/git.rs`
+    // look for. Without this, a non-English `LANG`/`LC_ALL` (e.g. `it_IT`)
+    // makes git emit localized labels the parser doesn't recognize. Safe
+    // as a POSIX inline env-var prefix — this fork's supported shells are
+    // bash/zsh/sh (no Windows/PowerShell/cmd.exe hook path).
+    let exec_command = if base_cmd == "git" {
+        format!("LC_ALL=C {}", command)
+    } else {
+        command.to_string()
+    };
     let rewritten = format!(
         "{} 2>&1 | sqz compress --cmd {}",
-        command, escaped_base,
+        exec_command, escaped_base,
     );
 
     // Output in the format OpenCode expects (same as Claude Code for CLI path)
@@ -1122,6 +1135,35 @@ mod tests {
     // (defined further below). The old assertion codified a too-broad
     // guard (`cmd.includes("sqz")`) that the runaway-prefix fix had to
     // tighten — keeping it would pin the bug in place.
+
+    /// Regression test for upstream issue #30 (OpenCode path): git output
+    /// is localized, so the hook rewrite must force `LC_ALL=C` when
+    /// executing git commands, mirroring the Claude Code hook fix in
+    /// `tool_hooks.rs`.
+    #[test]
+    fn test_process_opencode_hook_forces_c_locale_for_git_issue_30() {
+        let input = r#"{"tool":"bash","args":{"command":"git status"}}"#;
+        let result = process_opencode_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["args"]["command"].as_str().unwrap();
+        assert!(
+            cmd.starts_with("LC_ALL=C git status"),
+            "git commands must be executed with LC_ALL=C to force English output: {cmd}"
+        );
+    }
+
+    /// Non-git commands must not get the LC_ALL=C prefix.
+    #[test]
+    fn test_process_opencode_hook_does_not_force_locale_for_non_git() {
+        let input = r#"{"tool":"bash","args":{"command":"cargo test"}}"#;
+        let result = process_opencode_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["args"]["command"].as_str().unwrap();
+        assert!(
+            !cmd.contains("LC_ALL=C"),
+            "only git commands should get the LC_ALL=C prefix: {cmd}"
+        );
+    }
 
     #[test]
     fn test_process_opencode_hook_rewrites_bash() {
