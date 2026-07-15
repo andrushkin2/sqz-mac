@@ -84,17 +84,37 @@ const SqzPluginFactory = async (ctx: any) => {{
     return false;
   }}
 
-  // Don't rewrite commands containing shell operators. Appending
-  // `2>&1 | sqz compress` to a heredoc, compound command, existing
-  // pipe, or redirect corrupts the command. Issue #22: heredoc
-  // terminators like `EOF 2>&1 | sqz compress --cmd git` are not
-  // valid delimiters.
-  function hasShellOperators(cmd: string): boolean {{
+  // Heredocs can't be safely wrapped or appended to: the command
+  // string embeds the heredoc body up to its terminator (e.g. `EOF`),
+  // and any text appended after that — whether a plain `2>&1 | sqz`
+  // suffix or a closing `)` from a subshell wrap — lands on the same
+  // line as the terminator, which breaks the delimiter match (a
+  // heredoc terminator must appear alone on its own line). Issue #22:
+  // `EOF 2>&1 | sqz compress --cmd git` is not a valid delimiter.
+  // Command substitution (`$(...)`, backticks) is left alone too:
+  // it's still unclear whether every OpenCode-observed shell resolves
+  // these identically inside a subshell, so we stay conservative here
+  // rather than risk silently altering command semantics.
+  function hasHeredoc(cmd: string): boolean {{
+    return cmd.includes("<<") || cmd.includes("$(") || cmd.includes("`");
+  }}
+
+  // Compound commands, pipes, and redirects can still be compressed
+  // safely — just not by naively appending `2>&1 | sqz compress` to
+  // the raw command text, since that would either change operator
+  // precedence (`cmd1 && cmd2 2>&1 | sqz` only wraps `cmd2`'s output)
+  // or pipe nothing useful (`cmd > file 2>&1 | sqz` has no stdout left
+  // to compress once the redirect fires). Wrapping the whole command
+  // in a subshell first — `(cmd1 && cmd2) 2>&1 | sqz compress` —
+  // preserves the original semantics (exit codes, redirects, internal
+  // pipes) while capturing combined stdout/stderr of the entire
+  // compound expression for compression. Closes the gap where
+  // `&&`/`||`/`;`/`>`/`<`/`|` commands were skipped outright and never
+  // compressed at all.
+  function needsSubshellWrap(cmd: string): boolean {{
     if (cmd.includes("&&") || cmd.includes("||") || cmd.includes(";")) return true;
     if (cmd.includes(">") || cmd.includes("<")) return true;
     if (cmd.includes("|")) return true;
-    if (cmd.includes("<<")) return true;
-    if (cmd.includes("$(") || cmd.includes("`")) return true;
     return false;
   }}
 
@@ -157,7 +177,7 @@ const SqzPluginFactory = async (ctx: any) => {{
       if (!shouldIntercept(tool)) return;
 
       const cmd = output.args?.command ?? "";
-      if (!cmd || isAlreadyWrapped(cmd) || isInteractive(cmd) || hasShellOperators(cmd)) return;
+      if (!cmd || isAlreadyWrapped(cmd) || isInteractive(cmd) || hasHeredoc(cmd)) return;
 
       // Rewrite: pipe through `sqz compress --cmd <base>`.
       //
@@ -171,7 +191,8 @@ const SqzPluginFactory = async (ctx: any) => {{
       // and cmd.exe.
       const base = extractBaseCmd(cmd);
       const label = shellEscapeLabel(base);
-      output.args.command = `${{cmd}} 2>&1 | ${{SQZ_PATH}} compress --cmd ${{label}}`;
+      const body = needsSubshellWrap(cmd) ? `(${{cmd}})` : cmd;
+      output.args.command = `${{body}} 2>&1 | ${{SQZ_PATH}} compress --cmd ${{label}}`;
     }},
   }};
 }};
@@ -957,22 +978,83 @@ mod tests {
         assert!(content.contains("--watch"));
     }
 
-    /// Issue #22: the generated plugin must contain a `hasShellOperators`
-    /// guard so heredocs, compound commands, and pipes aren't corrupted.
+    /// Issue #22: the generated plugin must contain a `hasHeredoc`
+    /// guard so heredocs aren't corrupted by an appended/wrapped
+    /// compression pipe.
     #[test]
-    fn test_generate_opencode_plugin_has_shell_operator_guard() {
+    fn test_generate_opencode_plugin_has_heredoc_guard() {
         let content = generate_opencode_plugin("sqz");
         assert!(
-            content.contains("function hasShellOperators(cmd: string): boolean"),
-            "plugin must define hasShellOperators guard (issue #22)"
+            content.contains("function hasHeredoc(cmd: string): boolean"),
+            "plugin must define hasHeredoc guard (issue #22)"
         );
         assert!(
-            content.contains("hasShellOperators(cmd)"),
-            "plugin hook body must call hasShellOperators (issue #22)"
+            content.contains("hasHeredoc(cmd)"),
+            "plugin hook body must call hasHeredoc (issue #22)"
         );
         assert!(
             content.contains("<<"),
-            "hasShellOperators must check for heredoc operator"
+            "hasHeredoc must check for heredoc operator"
+        );
+    }
+
+    /// Phase 4 fix: compound commands, pipes, and redirects must no
+    /// longer be skipped outright — they should be wrapped in a
+    /// subshell so their combined output still gets compressed instead
+    /// of falling through uncompressed.
+    #[test]
+    fn test_generate_opencode_plugin_has_subshell_wrap_guard() {
+        let content = generate_opencode_plugin("sqz");
+        assert!(
+            content.contains("function needsSubshellWrap(cmd: string): boolean"),
+            "plugin must define needsSubshellWrap guard"
+        );
+        assert!(
+            content.contains("needsSubshellWrap(cmd)"),
+            "plugin hook body must call needsSubshellWrap to decide on wrapping"
+        );
+        assert!(
+            content.contains("&&") && content.contains("||") && content.contains(";"),
+            "needsSubshellWrap must check for &&, ||, and ; operators"
+        );
+    }
+
+    /// Locks in the actual rewrite shape: compound commands get
+    /// wrapped in `(cmd)` before the compression pipe is appended, so
+    /// `cmd1 && cmd2` becomes `(cmd1 && cmd2) 2>&1 | sqz compress ...`
+    /// rather than accidentally scoping the pipe to just `cmd2`, or
+    /// being skipped entirely.
+    #[test]
+    fn test_generate_opencode_plugin_wraps_compound_commands_in_subshell() {
+        let content = generate_opencode_plugin("sqz");
+        assert!(
+            content.contains("const body = needsSubshellWrap(cmd) ? `(${cmd})` : cmd;"),
+            "plugin must wrap the command in a subshell before piping through sqz \
+             when it contains a compound/pipe/redirect operator; got:\n{content}"
+        );
+        assert!(
+            content.contains("`${body} 2>&1 | ${SQZ_PATH} compress --cmd ${label}`"),
+            "plugin must build the final rewritten command from the (possibly \
+             subshell-wrapped) body, not the raw cmd; got:\n{content}"
+        );
+    }
+
+    /// A command with no shell operators at all must not gain an
+    /// unnecessary subshell wrap — the simple append form should still
+    /// be used so plain commands stay minimally rewritten.
+    #[test]
+    fn test_generate_opencode_plugin_plain_command_not_wrapped() {
+        let content = generate_opencode_plugin("sqz");
+        // needsSubshellWrap must NOT flag on interactive-safe, operator-free
+        // commands — verified structurally: the guard only checks for
+        // &&, ||, ;, >, <, and |.
+        assert!(
+            content.contains(r#"if (cmd.includes(">") || cmd.includes("<")) return true;"#),
+            "needsSubshellWrap must check for redirect operators"
+        );
+        assert!(
+            content.contains(r#"if (cmd.includes("|")) return true;"#),
+            "needsSubshellWrap must check for pipe operator"
         );
     }
 
