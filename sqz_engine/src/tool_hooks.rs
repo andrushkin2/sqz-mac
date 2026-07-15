@@ -22,7 +22,6 @@
 ///   Cursor's documented hook schema (per GitButler deep-dive and Cupcake
 ///   reference docs) confirms the response is `{permission, continue,
 ///   userMessage, agentMessage}` only — no `updated_input`.
-
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
@@ -83,7 +82,22 @@ pub enum HookPlatform {
 /// Exit code 0 = proceed with modified command.
 /// Exit code 1 = block the tool call (not used here).
 pub fn process_hook(input: &str) -> Result<String> {
-    process_hook_for_platform(input, HookPlatform::ClaudeCode)
+    process_hook_for_platform(input, HookPlatform::ClaudeCode, "sqz")
+}
+
+/// Same as [`process_hook`], but the rewritten command pipes through
+/// `sqz_cmd` instead of the bare `sqz` name.
+///
+/// Hooks are invoked directly by the AI tool (not through the user's
+/// login shell), so a bare `sqz` in the rewritten pipe only works if the
+/// user has put sqz on PATH. The README documents an alternative —
+/// referencing the binary by full path — but earlier releases always
+/// emitted the bare name regardless of how the hook itself was invoked.
+/// Callers (the `sqz hook <tool>` subcommand) should pass
+/// `std::env::current_exe()` here so the emitted pipe uses the exact
+/// path the hook was launched with.
+pub fn process_hook_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::ClaudeCode, sqz_cmd)
 }
 
 /// Process a hook invocation for Cursor (different output format).
@@ -91,14 +105,26 @@ pub fn process_hook(input: &str) -> Result<String> {
 /// Cursor uses flat JSON: `{ "permission": "allow", "updated_input": { "command": "..." } }`
 /// Returns `{}` when no rewrite (Cursor requires JSON on all code paths).
 pub fn process_hook_cursor(input: &str) -> Result<String> {
-    process_hook_for_platform(input, HookPlatform::Cursor)
+    process_hook_for_platform(input, HookPlatform::Cursor, "sqz")
+}
+
+/// Same as [`process_hook_cursor`], with an explicit sqz invocation path.
+/// See [`process_hook_with_cmd`] for rationale.
+pub fn process_hook_cursor_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::Cursor, sqz_cmd)
 }
 
 /// Process a hook invocation for Gemini CLI.
 ///
 /// Gemini uses: `{ "decision": "allow", "hookSpecificOutput": { "tool_input": { "command": "..." } } }`
 pub fn process_hook_gemini(input: &str) -> Result<String> {
-    process_hook_for_platform(input, HookPlatform::GeminiCli)
+    process_hook_for_platform(input, HookPlatform::GeminiCli, "sqz")
+}
+
+/// Same as [`process_hook_gemini`], with an explicit sqz invocation path.
+/// See [`process_hook_with_cmd`] for rationale.
+pub fn process_hook_gemini_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::GeminiCli, sqz_cmd)
 }
 
 /// Process a hook invocation for Windsurf.
@@ -106,7 +132,13 @@ pub fn process_hook_gemini(input: &str) -> Result<String> {
 /// Windsurf hook support is limited. We attempt the same rewrite as Claude Code
 /// but the output format may not be honored. Falls back to exit-code semantics.
 pub fn process_hook_windsurf(input: &str) -> Result<String> {
-    process_hook_for_platform(input, HookPlatform::Windsurf)
+    process_hook_for_platform(input, HookPlatform::Windsurf, "sqz")
+}
+
+/// Same as [`process_hook_windsurf`], with an explicit sqz invocation path.
+/// See [`process_hook_with_cmd`] for rationale.
+pub fn process_hook_windsurf_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::Windsurf, sqz_cmd)
 }
 
 /// Process a hook invocation for Kiro (IDE and CLI).
@@ -119,13 +151,21 @@ pub fn process_hook_windsurf(input: &str) -> Result<String> {
 /// Kiro uses `execute_bash` (alias `shell`) as the tool name for shell
 /// commands, with `tool_input.command` containing the command string.
 pub fn process_hook_kiro(input: &str) -> Result<String> {
-    process_hook_for_platform(input, HookPlatform::Kiro)
+    process_hook_for_platform(input, HookPlatform::Kiro, "sqz")
+}
+
+/// Same as [`process_hook_kiro`], with an explicit sqz invocation path.
+/// See [`process_hook_with_cmd`] for rationale.
+pub fn process_hook_kiro_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
+    process_hook_for_platform(input, HookPlatform::Kiro, sqz_cmd)
 }
 
 /// Platform-aware hook processing. Extracts the command from the tool-specific
 /// input format, rewrites it, and returns the response in the correct format
-/// for the target platform.
-fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<String> {
+/// for the target platform. `sqz_cmd` is the invocation used for the piped
+/// sqz process in the rewritten command — pass the resolved binary path
+/// where possible so the rewrite doesn't depend on `sqz` being on PATH.
+fn process_hook_for_platform(input: &str, platform: HookPlatform, sqz_cmd: &str) -> Result<String> {
     let parsed: serde_json::Value = serde_json::from_str(input)
         .map_err(|e| crate::error::SqzError::Other(format!("hook: invalid JSON input: {e}")))?;
 
@@ -152,10 +192,23 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
     // output enters the context unchanged. We can only compress Bash command
     // output by rewriting the command via PreToolUse. The MCP server
     // (sqz-mcp) provides compressed alternatives to these built-in tools.
-    let is_shell = matches!(tool_name, "Bash" | "bash" | "Shell" | "shell" | "terminal"
-        | "run_terminal_command" | "run_shell_command" | "execute_bash"
-        | "PowerShell" | "powershell" | "pwsh")
-        || matches!(hook_event, "beforeShellExecution" | "pre_run_command" | "preToolUse");
+    let is_shell = matches!(
+        tool_name,
+        "Bash"
+            | "bash"
+            | "Shell"
+            | "shell"
+            | "terminal"
+            | "run_terminal_command"
+            | "run_shell_command"
+            | "execute_bash"
+            | "PowerShell"
+            | "powershell"
+            | "pwsh"
+    ) || matches!(
+        hook_event,
+        "beforeShellExecution" | "pre_run_command" | "preToolUse"
+    );
 
     if !is_shell {
         // Pass through non-bash tools unchanged.
@@ -272,8 +325,9 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform) -> Result<Stri
         command.to_string()
     };
     let rewritten = format!(
-        "{} 2>&1 | sqz compress --cmd {}",
+        "{} 2>&1 | {} compress --cmd {}",
         exec_command,
+        shell_escape(sqz_cmd),
         shell_escape(command),
     );
 
@@ -633,18 +687,17 @@ not on PATH, run commands normally.
         ToolHookConfig {
             tool_name: "OpenCode".to_string(),
             config_path: PathBuf::from("opencode.json"),
-            config_content: format!(
-                r#"{{
+            config_content: r#"{
   "$schema": "https://opencode.ai/config.json",
-  "mcp": {{
-    "sqz": {{
+  "mcp": {
+    "sqz": {
       "type": "local",
       "command": ["sqz-mcp", "--transport", "stdio"]
-    }}
-  }},
+    }
+  },
   "plugin": ["sqz"]
-}}"#
-            ),
+}"#
+            .to_string(),
             scope: HookScope::Project,
         },
         // Codex (openai/codex) — no stable per-tool-call hook, only a
@@ -668,9 +721,7 @@ not on PATH, run commands normally.
         ToolHookConfig {
             tool_name: "Codex".to_string(),
             config_path: PathBuf::from("AGENTS.md"),
-            config_content: crate::codex_integration::agents_md_guidance_block(
-                sqz_path_raw,
-            ),
+            config_content: crate::codex_integration::agents_md_guidance_block(sqz_path_raw),
             scope: HookScope::Project,
         },
     ]
@@ -730,10 +781,11 @@ pub enum InstallScope {
 /// helper normalises user input (lowercase, hyphens/underscores/spaces
 /// collapsed, known aliases) so `Opencode`, `open-code`, `opencode`,
 /// `OPENCODE` all refer to the same tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ToolFilter {
     /// Install hook configs for every supported tool. The historical
     /// default of `sqz init`.
+    #[default]
     All,
     /// Install hook configs only for the named tools. Unknown names are
     /// surfaced to the caller as errors by the canonicalisation layer
@@ -744,12 +796,6 @@ pub enum ToolFilter {
     /// one integration skipped (e.g. a project shared with collaborators
     /// who don't want a `.windsurfrules` file in the repo).
     Skip(Vec<String>),
-}
-
-impl Default for ToolFilter {
-    fn default() -> Self {
-        ToolFilter::All
-    }
 }
 
 impl ToolFilter {
@@ -925,6 +971,7 @@ pub fn install_tool_hooks_scoped_filtered(
     filter: &ToolFilter,
 ) -> Vec<String> {
     let configs = generate_hook_configs(sqz_path);
+    let sqz_mcp_path = sibling_sqz_mcp_path(sqz_path);
     let mut installed = Vec::new();
 
     for config in &configs {
@@ -944,7 +991,10 @@ pub fn install_tool_hooks_scoped_filtered(
         // fixes issue #6 where the old write-if-missing logic created
         // a parallel `opencode.json` next to an existing `.jsonc`.
         if config.tool_name == "OpenCode" {
-            match crate::opencode_plugin::update_opencode_config_detailed(project_dir) {
+            match crate::opencode_plugin::update_opencode_config_detailed_with_mcp_path(
+                project_dir,
+                &sqz_mcp_path,
+            ) {
                 Ok((updated, _comments_lost)) => {
                     if updated && !installed.iter().any(|n| n == "OpenCode") {
                         installed.push("OpenCode".to_string());
@@ -963,15 +1013,13 @@ pub fn install_tool_hooks_scoped_filtered(
         // content) and the USER-level ~/.codex/config.toml (may contain
         // other MCP servers). Both go through the surgical helpers.
         if config.tool_name == "Codex" {
-            let agents_changed = crate::codex_integration::install_agents_md_guidance(
-                project_dir, sqz_path,
-            )
-            .unwrap_or(false);
-            let mcp_changed = crate::codex_integration::install_codex_mcp_config()
-                .unwrap_or(false);
-            if (agents_changed || mcp_changed)
-                && !installed.iter().any(|n| n == "Codex")
-            {
+            let agents_changed =
+                crate::codex_integration::install_agents_md_guidance(project_dir, sqz_path)
+                    .unwrap_or(false);
+            let mcp_changed =
+                crate::codex_integration::install_codex_mcp_config_with_path(&sqz_mcp_path)
+                    .unwrap_or(false);
+            if (agents_changed || mcp_changed) && !installed.iter().any(|n| n == "Codex") {
                 installed.push("Codex".to_string());
             }
             continue;
@@ -987,16 +1035,12 @@ pub fn install_tool_hooks_scoped_filtered(
         // belong to Claude Code conceptually — if you're installing the
         // hook, you want the guidance and MCP wiring too.
         if config.tool_name == "Claude Code" && scope == InstallScope::Global {
-            let hook_installed = match install_claude_global(sqz_path) {
-                Ok(v) => v,
-                Err(_) => false,
-            };
-            let md_changed = crate::claude_md_integration::install_claude_md_guidance(
-                project_dir, sqz_path,
-            )
-            .unwrap_or(false);
+            let hook_installed = install_claude_global(sqz_path).unwrap_or_default();
+            let md_changed =
+                crate::claude_md_integration::install_claude_md_guidance(project_dir, sqz_path)
+                    .unwrap_or(false);
             let mcp_changed =
-                crate::claude_md_integration::install_claude_mcp_config()
+                crate::claude_md_integration::install_claude_mcp_config_with_path(&sqz_mcp_path)
                     .unwrap_or(false);
             if (hook_installed || md_changed || mcp_changed)
                 && !installed.iter().any(|n| n == "Claude Code")
@@ -1016,16 +1060,11 @@ pub fn install_tool_hooks_scoped_filtered(
             // already present).
             if config.tool_name == "Claude Code" {
                 let md_changed =
-                    crate::claude_md_integration::install_claude_md_guidance(
-                        project_dir, sqz_path,
-                    )
-                    .unwrap_or(false);
-                let mcp_changed =
-                    crate::claude_md_integration::install_claude_mcp_config()
+                    crate::claude_md_integration::install_claude_md_guidance(project_dir, sqz_path)
                         .unwrap_or(false);
-                if (md_changed || mcp_changed)
-                    && !installed.iter().any(|n| n == "Claude Code")
-                {
+                let mcp_changed =
+                    crate::claude_md_integration::install_claude_mcp_config().unwrap_or(false);
+                if (md_changed || mcp_changed) && !installed.iter().any(|n| n == "Claude Code") {
                     installed.push("Claude Code".to_string());
                 }
             }
@@ -1048,9 +1087,8 @@ pub fn install_tool_hooks_scoped_filtered(
             // provides sqz_read_file/grep/list_dir, and the CLAUDE.md
             // tells it when to pick which.
             if config.tool_name == "Claude Code" {
-                let _ = crate::claude_md_integration::install_claude_md_guidance(
-                    project_dir, sqz_path,
-                );
+                let _ =
+                    crate::claude_md_integration::install_claude_md_guidance(project_dir, sqz_path);
                 let _ = crate::claude_md_integration::install_claude_mcp_config();
             }
         }
@@ -1127,12 +1165,8 @@ fn install_claude_global_at(sqz_path: &str, home_override: Option<&Path>) -> Res
 
     // Parse the existing file, or start from an empty object.
     let mut root: serde_json::Value = if path.exists() {
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            crate::error::SqzError::Other(format!(
-                "read {}: {e}",
-                path.display()
-            ))
-        })?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| crate::error::SqzError::Other(format!("read {}: {e}", path.display())))?;
         if content.trim().is_empty() {
             serde_json::Value::Object(serde_json::Map::new())
         } else {
@@ -1196,10 +1230,7 @@ fn install_claude_global_at(sqz_path: &str, home_override: Option<&Path>) -> Res
     // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            crate::error::SqzError::Other(format!(
-                "create {}: {e}",
-                parent.display()
-            ))
+            crate::error::SqzError::Other(format!("create {}: {e}", parent.display()))
         })?;
     }
 
@@ -1207,24 +1238,15 @@ fn install_claude_global_at(sqz_path: &str, home_override: Option<&Path>) -> Res
     // rtk's `atomic_write` in src/hooks/init.rs. Keeps the old file
     // intact if serialization or write fails halfway.
     let parent = path.parent().ok_or_else(|| {
-        crate::error::SqzError::Other(format!(
-            "path {} has no parent directory",
-            path.display()
-        ))
+        crate::error::SqzError::Other(format!("path {} has no parent directory", path.display()))
     })?;
     let tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
-        crate::error::SqzError::Other(format!(
-            "create temp file in {}: {e}",
-            parent.display()
-        ))
+        crate::error::SqzError::Other(format!("create temp file in {}: {e}", parent.display()))
     })?;
     let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(root_obj.clone()))
         .map_err(|e| crate::error::SqzError::Other(format!("serialize settings.json: {e}")))?;
     std::fs::write(tmp.path(), serialized).map_err(|e| {
-        crate::error::SqzError::Other(format!(
-            "write to temp file {}: {e}",
-            tmp.path().display()
-        ))
+        crate::error::SqzError::Other(format!("write to temp file {}: {e}", tmp.path().display()))
     })?;
     tmp.persist(&path).map_err(|e| {
         crate::error::SqzError::Other(format!(
@@ -1255,9 +1277,7 @@ pub fn remove_claude_global_hook() -> Result<Option<(PathBuf, bool)>> {
 
 /// Internal: home-dir-injectable counterpart used by tests. See
 /// `install_claude_global_at` for rationale.
-fn remove_claude_global_hook_at(
-    home_override: Option<&Path>,
-) -> Result<Option<(PathBuf, bool)>> {
+fn remove_claude_global_hook_at(home_override: Option<&Path>) -> Result<Option<(PathBuf, bool)>> {
     let path = match home_override {
         Some(h) => h.join(".claude").join("settings.json"),
         None => match claude_user_settings_path() {
@@ -1269,9 +1289,8 @@ fn remove_claude_global_hook_at(
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        crate::error::SqzError::Other(format!("read {}: {e}", path.display()))
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| crate::error::SqzError::Other(format!("read {}: {e}", path.display())))?;
     if content.trim().is_empty() {
         return Ok(Some((path, false)));
     }
@@ -1327,36 +1346,22 @@ fn remove_claude_global_hook_at(
     // paths.
     if root_obj.is_empty() {
         std::fs::remove_file(&path).map_err(|e| {
-            crate::error::SqzError::Other(format!(
-                "remove {}: {e}",
-                path.display()
-            ))
+            crate::error::SqzError::Other(format!("remove {}: {e}", path.display()))
         })?;
         return Ok(Some((path, true)));
     }
 
     // Atomic rewrite.
     let parent = path.parent().ok_or_else(|| {
-        crate::error::SqzError::Other(format!(
-            "path {} has no parent directory",
-            path.display()
-        ))
+        crate::error::SqzError::Other(format!("path {} has no parent directory", path.display()))
     })?;
     let tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
-        crate::error::SqzError::Other(format!(
-            "create temp file in {}: {e}",
-            parent.display()
-        ))
+        crate::error::SqzError::Other(format!("create temp file in {}: {e}", parent.display()))
     })?;
     let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(root_obj.clone()))
-        .map_err(|e| {
-            crate::error::SqzError::Other(format!("serialize settings.json: {e}"))
-        })?;
+        .map_err(|e| crate::error::SqzError::Other(format!("serialize settings.json: {e}")))?;
     std::fs::write(tmp.path(), serialized).map_err(|e| {
-        crate::error::SqzError::Other(format!(
-            "write to temp file {}: {e}",
-            tmp.path().display()
-        ))
+        crate::error::SqzError::Other(format!("write to temp file {}: {e}", tmp.path().display()))
     })?;
     tmp.persist(&path).map_err(|e| {
         crate::error::SqzError::Other(format!(
@@ -1461,9 +1466,67 @@ pub(crate) fn json_escape_string_value(s: &str) -> String {
     out
 }
 
+/// Resolve `~/.sqz/presets` (or `%USERPROFILE%\.sqz\presets` on Windows)
+/// as a string, for embedding in generated MCP server configs as an
+/// explicit `--preset-dir` argument.
+///
+/// This matches `sqz-mcp`'s own built-in default, so passing it
+/// explicitly is redundant in the common case — but it keeps the
+/// generated config self-documenting and correct even if that default
+/// ever changes, and it's the same directory `sqz init` writes
+/// `default.toml` into.
+///
+/// Falls back to `.` if `$HOME`/`%USERPROFILE%` can't be resolved.
+pub(crate) fn default_preset_dir_str() -> String {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    match home {
+        Some(h) => h
+            .join(".sqz")
+            .join("presets")
+            .to_string_lossy()
+            .replace('\\', "/"),
+        None => ".".to_string(),
+    }
+}
+
+/// Derive the path to the `sqz-mcp` binary that ships alongside `sqz_path`.
+///
+/// `sqz` and `sqz-mcp` are built and installed as siblings (same `bin/`
+/// directory, e.g. via `cargo install` or a release tarball), so the MCP
+/// server can be found by swapping the executable's file name while
+/// keeping its parent directory and extension (`.exe` on Windows).
+///
+/// Generated MCP configs (Claude's `~/.claude.json`, Codex's
+/// `~/.codex/config.toml`, OpenCode's `opencode.json`) need this because
+/// those hosts launch MCP servers directly rather than through the
+/// user's shell, so a bare `sqz-mcp` only works if it happens to be on
+/// PATH. Falls back to the bare name `sqz-mcp` if `sqz_path` has no
+/// parent directory (e.g. it's already just `"sqz"`).
+fn sibling_sqz_mcp_path(sqz_path: &str) -> String {
+    // Deliberately string-based rather than `std::path::Path`: `sqz_path`
+    // may be a Windows-style path (backslash separators) even when this
+    // code runs on a Unix host during tests, and `Path` only recognizes
+    // the host platform's separator.
+    let normalized = sqz_path.replace('\\', "/");
+    let is_exe = normalized
+        .rsplit('.')
+        .next()
+        .map(|ext| ext.eq_ignore_ascii_case("exe") && ext.len() != normalized.len())
+        .unwrap_or(false);
+    let mcp_name = if is_exe { "sqz-mcp.exe" } else { "sqz-mcp" };
+    match normalized.rfind('/') {
+        Some(idx) => format!("{}/{}", &normalized[..idx], mcp_name),
+        None => mcp_name.to_string(),
+    }
+}
+
 /// Shell-escape a string for use in an environment variable assignment.
 fn shell_escape(s: &str) -> String {
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -1485,7 +1548,7 @@ pub(crate) fn has_shell_operators(cmd: &str) -> bool {
         || cmd.contains('&') && !cmd.contains("&&") // background &
         || cmd.contains("<<")  // heredoc
         || cmd.contains("$(")  // command substitution
-        || cmd.contains('`')   // backtick substitution
+        || cmd.contains('`') // backtick substitution
 }
 
 /// Check if a command is interactive or long-running (should not be intercepted).
@@ -1493,9 +1556,25 @@ fn is_interactive_command(cmd: &str) -> bool {
     let base = extract_base_command(cmd);
     matches!(
         base,
-        "vim" | "vi" | "nano" | "emacs" | "less" | "more" | "top" | "htop"
-        | "ssh" | "python" | "python3" | "node" | "irb" | "ghci"
-        | "psql" | "mysql" | "sqlite3" | "mongo" | "redis-cli"
+        "vim"
+            | "vi"
+            | "nano"
+            | "emacs"
+            | "less"
+            | "more"
+            | "top"
+            | "htop"
+            | "ssh"
+            | "python"
+            | "python3"
+            | "node"
+            | "irb"
+            | "ghci"
+            | "psql"
+            | "mysql"
+            | "sqlite3"
+            | "mongo"
+            | "redis-cli"
     ) || cmd.contains("--watch")
         || cmd.contains("-w ")
         || cmd.ends_with(" -w")
@@ -1511,6 +1590,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_process_hook_with_cmd_uses_resolved_path_not_bare_name() {
+        // Regression test: the emitted pipe must use the resolved sqz
+        // binary path passed in, not always the bare "sqz" name. Hooks
+        // are invoked directly by the AI tool (not the user's shell), so
+        // a bare name silently fails to resolve if sqz isn't on PATH.
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"git status"}}"#;
+        let result = process_hook_with_cmd(input, "/opt/sqz/bin/sqz").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        // The path contains `/`, so `shell_escape` wraps it in single
+        // quotes for POSIX-shell safety; check for the resolved path
+        // rather than assuming it's unquoted.
+        assert!(
+            cmd.contains("/opt/sqz/bin/sqz") && cmd.contains("compress"),
+            "should pipe through the resolved sqz path, not a bare name: {cmd}"
+        );
+        assert!(
+            !cmd.trim_start().starts_with("sqz compress") && !cmd.contains("| sqz compress"),
+            "must not fall back to the bare 'sqz' name: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_sibling_sqz_mcp_path_derives_from_sqz_path() {
+        assert_eq!(
+            sibling_sqz_mcp_path("/opt/sqz/bin/sqz"),
+            "/opt/sqz/bin/sqz-mcp"
+        );
+        assert_eq!(
+            sibling_sqz_mcp_path(r"C:\Users\user\.cargo\bin\sqz.exe"),
+            "C:/Users/user/.cargo/bin/sqz-mcp.exe"
+        );
+        // No parent directory: fall back to the bare name.
+        assert_eq!(sibling_sqz_mcp_path("sqz"), "sqz-mcp");
+    }
+
+    #[test]
     fn test_process_hook_rewrites_bash_command() {
         // Use the official Claude Code input format: tool_name + tool_input
         let input = r#"{"tool_name":"Bash","tool_input":{"command":"git status"}}"#;
@@ -1522,8 +1640,14 @@ mod tests {
         assert_eq!(hook_output["permissionDecision"].as_str().unwrap(), "allow");
         // updatedInput for Claude Code (camelCase)
         let cmd = hook_output["updatedInput"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "should pipe through sqz: {cmd}");
-        assert!(cmd.contains("git status"), "should preserve original command: {cmd}");
+        assert!(
+            cmd.contains("sqz compress"),
+            "should pipe through sqz: {cmd}"
+        );
+        assert!(
+            cmd.contains("git status"),
+            "should preserve original command: {cmd}"
+        );
         // Issue #10: the label is now passed as `--cmd NAME`, not as a
         // `SQZ_CMD=NAME` prefix (sh-specific, broken on PowerShell/cmd.exe).
         assert!(
@@ -1535,9 +1659,18 @@ mod tests {
             "new rewrites must not emit the legacy sh-style env prefix: {cmd}"
         );
         // Claude Code format should NOT have top-level decision/permission/continue
-        assert!(parsed.get("decision").is_none(), "Claude Code format should not have top-level decision");
-        assert!(parsed.get("permission").is_none(), "Claude Code format should not have top-level permission");
-        assert!(parsed.get("continue").is_none(), "Claude Code format should not have top-level continue");
+        assert!(
+            parsed.get("decision").is_none(),
+            "Claude Code format should not have top-level decision"
+        );
+        assert!(
+            parsed.get("permission").is_none(),
+            "Claude Code format should not have top-level permission"
+        );
+        assert!(
+            parsed.get("continue").is_none(),
+            "Claude Code format should not have top-level continue"
+        );
     }
 
     /// Regression test for upstream issue #30: `git status`/`git log`/etc.
@@ -1581,14 +1714,20 @@ mod tests {
             !cmd.contains("LC_ALL=C"),
             "only git commands should get the LC_ALL=C prefix: {cmd}"
         );
-        assert!(cmd.starts_with("cargo test"), "command should be unmodified: {cmd}");
+        assert!(
+            cmd.starts_with("cargo test"),
+            "command should be unmodified: {cmd}"
+        );
     }
 
     #[test]
     fn test_process_hook_passes_through_non_bash() {
         let input = r#"{"tool_name":"Read","tool_input":{"file_path":"file.txt"}}"#;
         let result = process_hook(input).unwrap();
-        assert_eq!(result, input, "non-bash tools should pass through unchanged");
+        assert_eq!(
+            result, input,
+            "non-bash tools should pass through unchanged"
+        );
     }
 
     #[test]
@@ -1661,13 +1800,30 @@ mod tests {
         // Gemini uses top-level decision (not hookSpecificOutput.permissionDecision)
         assert_eq!(parsed["decision"].as_str().unwrap(), "allow");
         // Gemini format: hookSpecificOutput.tool_input.command (NOT updatedInput)
-        let cmd = parsed["hookSpecificOutput"]["tool_input"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "should pipe through sqz: {cmd}");
+        let cmd = parsed["hookSpecificOutput"]["tool_input"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.contains("sqz compress"),
+            "should pipe through sqz: {cmd}"
+        );
         // Should NOT have Claude Code fields
-        assert!(parsed.get("hookSpecificOutput").unwrap().get("updatedInput").is_none(),
-            "Gemini format should not have updatedInput");
-        assert!(parsed.get("hookSpecificOutput").unwrap().get("permissionDecision").is_none(),
-            "Gemini format should not have permissionDecision");
+        assert!(
+            parsed
+                .get("hookSpecificOutput")
+                .unwrap()
+                .get("updatedInput")
+                .is_none(),
+            "Gemini format should not have updatedInput"
+        );
+        assert!(
+            parsed
+                .get("hookSpecificOutput")
+                .unwrap()
+                .get("permissionDecision")
+                .is_none(),
+            "Gemini format should not have permissionDecision"
+        );
     }
 
     #[test]
@@ -1676,8 +1832,13 @@ mod tests {
         let input = r#"{"toolName":"Bash","toolCall":{"command":"git status"}}"#;
         let result = process_hook(input).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "legacy format should still work: {cmd}");
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.contains("sqz compress"),
+            "legacy format should still work: {cmd}"
+        );
     }
 
     #[test]
@@ -1689,11 +1850,16 @@ mod tests {
         // Cursor expects flat permission + updated_input (snake_case)
         assert_eq!(parsed["permission"].as_str().unwrap(), "allow");
         let cmd = parsed["updated_input"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "cursor format should work: {cmd}");
+        assert!(
+            cmd.contains("sqz compress"),
+            "cursor format should work: {cmd}"
+        );
         assert!(cmd.contains("git status"));
         // Should NOT have Claude Code hookSpecificOutput
-        assert!(parsed.get("hookSpecificOutput").is_none(),
-            "Cursor format should not have hookSpecificOutput");
+        assert!(
+            parsed.get("hookSpecificOutput").is_none(),
+            "Cursor format should not have hookSpecificOutput"
+        );
     }
 
     #[test]
@@ -1701,7 +1867,10 @@ mod tests {
         // Cursor requires {} on all code paths, even when no rewrite happens
         let input = r#"{"tool_name":"Read","tool_input":{"file_path":"file.txt"}}"#;
         let result = process_hook_cursor(input).unwrap();
-        assert_eq!(result, "{}", "Cursor passthrough must return empty JSON object");
+        assert_eq!(
+            result, "{}",
+            "Cursor passthrough must return empty JSON object"
+        );
     }
 
     #[test]
@@ -1709,7 +1878,10 @@ mod tests {
         // sqz commands should not be double-wrapped; Cursor still needs {}
         let input = r#"{"tool_name":"Shell","tool_input":{"command":"sqz stats"}}"#;
         let result = process_hook_cursor(input).unwrap();
-        assert_eq!(result, "{}", "Cursor no-rewrite must return empty JSON object");
+        assert_eq!(
+            result, "{}",
+            "Cursor no-rewrite must return empty JSON object"
+        );
     }
 
     #[test]
@@ -1719,15 +1891,23 @@ mod tests {
         let result = process_hook_windsurf(input).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         // Windsurf uses Claude Code format as best-effort
-        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "windsurf format should work: {cmd}");
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.contains("sqz compress"),
+            "windsurf format should work: {cmd}"
+        );
         assert!(cmd.contains("cargo test"));
         // Issue #10: label is passed as `--cmd`, not `SQZ_CMD=` prefix.
         assert!(
             cmd.contains("--cmd 'cargo test'"),
             "full command must be passed via --cmd flag: {cmd}"
         );
-        assert!(!cmd.contains("SQZ_CMD="), "must not emit legacy env prefix: {cmd}");
+        assert!(
+            !cmd.contains("SQZ_CMD="),
+            "must not emit legacy env prefix: {cmd}"
+        );
     }
 
     #[test]
@@ -1768,7 +1948,8 @@ mod tests {
     /// a normal CLI argument that every shell accepts.
     #[test]
     fn issue_10_rewrite_is_shell_neutral() {
-        let input = r#"{"tool_name":"Bash","tool_input":{"command":"dotnet build NewNeonCheckers3.sln"}}"#;
+        let input =
+            r#"{"tool_name":"Bash","tool_input":{"command":"dotnet build NewNeonCheckers3.sln"}}"#;
         let result = process_hook(input).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
@@ -1792,7 +1973,10 @@ mod tests {
             "original command must be preserved verbatim: {cmd}"
         );
         // And the pipe to sqz must be there.
-        assert!(cmd.contains("| sqz compress"), "must pipe through sqz: {cmd}");
+        assert!(
+            cmd.contains("| sqz compress"),
+            "must pipe through sqz: {cmd}"
+        );
     }
 
     /// The already-wrapped guard must recognise the new `--cmd` form so
@@ -1823,32 +2007,50 @@ mod tests {
     #[test]
     fn test_generate_hook_configs() {
         let configs = generate_hook_configs("sqz");
-        assert!(configs.len() >= 5, "should generate configs for multiple tools (including OpenCode)");
+        assert!(
+            configs.len() >= 5,
+            "should generate configs for multiple tools (including OpenCode)"
+        );
         assert!(configs.iter().any(|c| c.tool_name == "Claude Code"));
         assert!(configs.iter().any(|c| c.tool_name == "Cursor"));
         assert!(configs.iter().any(|c| c.tool_name == "OpenCode"));
         // Windsurf, Cline, and Cursor should generate rules files, not hook configs
         // (none of the three support transparent command rewriting via hooks).
         let windsurf = configs.iter().find(|c| c.tool_name == "Windsurf").unwrap();
-        assert_eq!(windsurf.config_path, PathBuf::from(".windsurfrules"),
-            "Windsurf should use .windsurfrules, not .windsurf/hooks.json");
+        assert_eq!(
+            windsurf.config_path,
+            PathBuf::from(".windsurfrules"),
+            "Windsurf should use .windsurfrules, not .windsurf/hooks.json"
+        );
         let cline = configs.iter().find(|c| c.tool_name == "Cline").unwrap();
-        assert_eq!(cline.config_path, PathBuf::from(".clinerules"),
-            "Cline should use .clinerules, not .clinerules/hooks/PreToolUse");
+        assert_eq!(
+            cline.config_path,
+            PathBuf::from(".clinerules"),
+            "Cline should use .clinerules, not .clinerules/hooks/PreToolUse"
+        );
         // Cursor — empirically verified (forum/Cupcake/GitButler docs +
         // live cursor-agent trace) that beforeShellExecution cannot rewrite
         // commands. Use the modern .cursor/rules/*.mdc format.
         let cursor = configs.iter().find(|c| c.tool_name == "Cursor").unwrap();
-        assert_eq!(cursor.config_path, PathBuf::from(".cursor/rules/sqz.mdc"),
+        assert_eq!(
+            cursor.config_path,
+            PathBuf::from(".cursor/rules/sqz.mdc"),
             "Cursor should use .cursor/rules/sqz.mdc (modern rules), not \
-             .cursor/hooks.json (non-functional) or .cursorrules (legacy)");
-        assert!(cursor.config_content.starts_with("---"),
-            "Cursor rule should start with YAML frontmatter");
-        assert!(cursor.config_content.contains("alwaysApply: true"),
+             .cursor/hooks.json (non-functional) or .cursorrules (legacy)"
+        );
+        assert!(
+            cursor.config_content.starts_with("---"),
+            "Cursor rule should start with YAML frontmatter"
+        );
+        assert!(
+            cursor.config_content.contains("alwaysApply: true"),
             "Cursor rule should use alwaysApply: true so the guidance loads \
-             for every agent interaction");
-        assert!(cursor.config_content.contains("sqz"),
-            "Cursor rule body should mention sqz");
+             for every agent interaction"
+        );
+        assert!(
+            cursor.config_content.contains("sqz"),
+            "Cursor rule body should mention sqz"
+        );
     }
 
     #[test]
@@ -1858,7 +2060,10 @@ mod tests {
         // can point at content the LLM no longer has in context.
         // Documented at docs.anthropic.com/en/docs/claude-code/hooks-guide.
         let configs = generate_hook_configs("sqz");
-        let claude = configs.iter().find(|c| c.tool_name == "Claude Code").unwrap();
+        let claude = configs
+            .iter()
+            .find(|c| c.tool_name == "Claude Code")
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&claude.config_content)
             .expect("Claude Code config must be valid JSON");
 
@@ -1885,13 +2090,20 @@ mod tests {
     fn test_json_escape_string_value() {
         // Plain ASCII: unchanged
         assert_eq!(json_escape_string_value("sqz"), "sqz");
-        assert_eq!(json_escape_string_value("/usr/local/bin/sqz"), "/usr/local/bin/sqz");
+        assert_eq!(
+            json_escape_string_value("/usr/local/bin/sqz"),
+            "/usr/local/bin/sqz"
+        );
         // Backslash: escaped
-        assert_eq!(json_escape_string_value(r"C:\Users\Alice\sqz.exe"),
-                   r"C:\\Users\\Alice\\sqz.exe");
+        assert_eq!(
+            json_escape_string_value(r"C:\Users\Alice\sqz.exe"),
+            r"C:\\Users\\Alice\\sqz.exe"
+        );
         // Double quote: escaped
-        assert_eq!(json_escape_string_value(r#"path with "quotes""#),
-                   r#"path with \"quotes\""#);
+        assert_eq!(
+            json_escape_string_value(r#"path with "quotes""#),
+            r#"path with \"quotes\""#
+        );
         // Control chars
         assert_eq!(json_escape_string_value("a\nb\tc"), r"a\nb\tc");
     }
@@ -1903,7 +2115,9 @@ mod tests {
         let windows_path = r"C:\Users\SqzUser\.cargo\bin\sqz.exe";
         let configs = generate_hook_configs(windows_path);
 
-        let claude = configs.iter().find(|c| c.tool_name == "Claude Code")
+        let claude = configs
+            .iter()
+            .find(|c| c.tool_name == "Claude Code")
             .expect("Claude config should be generated");
         let parsed: serde_json::Value = serde_json::from_str(&claude.config_content)
             .expect("Claude hook config must be valid JSON on Windows paths");
@@ -1912,8 +2126,10 @@ mod tests {
         let cmd = parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .expect("command field must be a string");
-        assert!(cmd.contains(windows_path),
-            "command '{cmd}' must contain the original Windows path '{windows_path}'");
+        assert!(
+            cmd.contains(windows_path),
+            "command '{cmd}' must contain the original Windows path '{windows_path}'"
+        );
     }
 
     #[test]
@@ -1928,12 +2144,18 @@ mod tests {
 
         let cursor = configs.iter().find(|c| c.tool_name == "Cursor").unwrap();
         assert_eq!(cursor.config_path, PathBuf::from(".cursor/rules/sqz.mdc"));
-        assert!(cursor.config_content.contains(windows_path),
+        assert!(
+            cursor.config_content.contains(windows_path),
             "Cursor rule must contain the raw (unescaped) path so users can \
-             copy-paste the shown commands — got:\n{}", cursor.config_content);
-        assert!(!cursor.config_content.contains(r"C:\\Users"),
+             copy-paste the shown commands — got:\n{}",
+            cursor.config_content
+        );
+        assert!(
+            !cursor.config_content.contains(r"C:\\Users"),
             "Cursor rule must NOT double-escape backslashes in markdown — \
-             got:\n{}", cursor.config_content);
+             got:\n{}",
+            cursor.config_content
+        );
     }
 
     #[test]
@@ -1941,10 +2163,15 @@ mod tests {
         let windows_path = r"C:\Users\SqzUser\.cargo\bin\sqz.exe";
         let configs = generate_hook_configs(windows_path);
 
-        let gemini = configs.iter().find(|c| c.tool_name == "Gemini CLI").unwrap();
+        let gemini = configs
+            .iter()
+            .find(|c| c.tool_name == "Gemini CLI")
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&gemini.config_content)
             .expect("Gemini hook config must be valid JSON on Windows paths");
-        let cmd = parsed["hooks"]["BeforeTool"][0]["hooks"][0]["command"].as_str().unwrap();
+        let cmd = parsed["hooks"]["BeforeTool"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
         assert!(cmd.contains(windows_path));
     }
 
@@ -1958,12 +2185,16 @@ mod tests {
 
         for tool in &["Windsurf", "Cline", "Cursor"] {
             let cfg = configs.iter().find(|c| &c.tool_name == tool).unwrap();
-            assert!(cfg.config_content.contains(windows_path),
+            assert!(
+                cfg.config_content.contains(windows_path),
                 "{tool} rules file must contain the raw (unescaped) path — got:\n{}",
-                cfg.config_content);
-            assert!(!cfg.config_content.contains(r"C:\\Users"),
+                cfg.config_content
+            );
+            assert!(
+                !cfg.config_content.contains(r"C:\\Users"),
                 "{tool} rules file must NOT double-escape backslashes — got:\n{}",
-                cfg.config_content);
+                cfg.config_content
+            );
         }
     }
 
@@ -1974,10 +2205,15 @@ mod tests {
         let unix_path = "/usr/local/bin/sqz";
         let configs = generate_hook_configs(unix_path);
 
-        let claude = configs.iter().find(|c| c.tool_name == "Claude Code").unwrap();
+        let claude = configs
+            .iter()
+            .find(|c| c.tool_name == "Claude Code")
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&claude.config_content)
             .expect("Unix path should produce valid JSON");
-        let cmd = parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+        let cmd = parsed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
         assert_eq!(cmd, "/usr/local/bin/sqz hook claude");
     }
 
@@ -1997,13 +2233,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let installed = install_tool_hooks(dir.path(), "sqz");
         // Should install at least some hooks
-        assert!(!installed.is_empty(), "should install at least one hook config");
+        assert!(
+            !installed.is_empty(),
+            "should install at least one hook config"
+        );
         // Verify files were created
         for name in &installed {
             let configs = generate_hook_configs("sqz");
             let config = configs.iter().find(|c| &c.tool_name == name).unwrap();
             let path = dir.path().join(&config.config_path);
-            assert!(path.exists(), "hook config should exist: {}", path.display());
+            assert!(
+                path.exists(),
+                "hook config should exist: {}",
+                path.display()
+            );
         }
     }
 
@@ -2018,7 +2261,10 @@ mod tests {
         // Second install should not overwrite
         install_tool_hooks(dir.path(), "sqz");
         let content = std::fs::read_to_string(&custom_path).unwrap();
-        assert_eq!(content, "custom content", "should not overwrite existing config");
+        assert_eq!(
+            content, "custom content",
+            "should not overwrite existing config"
+        );
     }
 }
 
@@ -2121,7 +2367,11 @@ mod global_install_tests {
         // PreToolUse should now contain BOTH the user's format-on-edit
         // hook and sqz's Bash hook — our install appends, not replaces.
         let pre = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 2, "expected user's hook + sqz's hook, got: {pre:?}");
+        assert_eq!(
+            pre.len(),
+            2,
+            "expected user's hook + sqz's hook, got: {pre:?}"
+        );
         let matchers: Vec<&str> = pre
             .iter()
             .map(|e| e["matcher"].as_str().unwrap_or(""))
@@ -2195,7 +2445,11 @@ mod global_install_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let pre = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 1, "stale sqz entry must be replaced, not duplicated");
+        assert_eq!(
+            pre.len(),
+            1,
+            "stale sqz entry must be replaced, not duplicated"
+        );
         let cmd = pre[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(cmd.contains("/new/path/sqz"));
         assert!(!cmd.contains("/old/path/sqz"));
@@ -2226,7 +2480,9 @@ mod global_install_tests {
         .unwrap();
 
         install_claude_global_at("/usr/local/bin/sqz", Some(tmp.path())).unwrap();
-        let result = remove_claude_global_hook_at(Some(tmp.path())).unwrap().unwrap();
+        let result = remove_claude_global_hook_at(Some(tmp.path()))
+            .unwrap()
+            .unwrap();
         assert_eq!(result.0, settings);
         assert!(result.1, "should report that the file was modified");
 
@@ -2254,9 +2510,14 @@ mod global_install_tests {
         let path = tmp.path().join(".claude").join("settings.json");
         assert!(path.exists(), "precondition: install created the file");
 
-        let result = remove_claude_global_hook_at(Some(tmp.path())).unwrap().unwrap();
+        let result = remove_claude_global_hook_at(Some(tmp.path()))
+            .unwrap()
+            .unwrap();
         assert!(result.1);
-        assert!(!path.exists(), "sqz-only settings.json should be removed on uninstall");
+        assert!(
+            !path.exists(),
+            "sqz-only settings.json should be removed on uninstall"
+        );
     }
 
     /// Consolidated regression test for upstream issue #21: `sqz init`
@@ -2281,9 +2542,9 @@ mod global_install_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         for event in ["PreToolUse", "PreCompact", "SessionStart"] {
-            let arr = parsed["hooks"][event].as_array().unwrap_or_else(|| {
-                panic!("expected hooks.{event} to be an array in {parsed}")
-            });
+            let arr = parsed["hooks"][event]
+                .as_array()
+                .unwrap_or_else(|| panic!("expected hooks.{event} to be an array in {parsed}"));
             assert_eq!(
                 arr.len(),
                 1,
@@ -2293,7 +2554,9 @@ mod global_install_tests {
 
         // Uninstall must remove every sqz-owned entry — and since sqz was
         // the settings.json's only content, the file itself is removed.
-        let result = remove_claude_global_hook_at(Some(tmp.path())).unwrap().unwrap();
+        let result = remove_claude_global_hook_at(Some(tmp.path()))
+            .unwrap()
+            .unwrap();
         assert!(result.1, "uninstall should report the file was modified");
         assert!(
             !settings.exists(),
@@ -2305,7 +2568,9 @@ mod global_install_tests {
     fn global_uninstall_on_missing_file_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(
-            remove_claude_global_hook_at(Some(tmp.path())).unwrap().is_none(),
+            remove_claude_global_hook_at(Some(tmp.path()))
+                .unwrap()
+                .is_none(),
             "missing file should return None, not error"
         );
     }
@@ -2344,15 +2609,33 @@ mod issue_11_tool_filter_tests {
         // Each row: list of aliases a user might type, followed by the
         // canonical form they should all normalise to.
         for aliases in &[
-            (vec!["Claude Code", "claude-code", "claude", "CLAUDE", "ClaudeCode"], "claudecode"),
+            (
+                vec![
+                    "Claude Code",
+                    "claude-code",
+                    "claude",
+                    "CLAUDE",
+                    "ClaudeCode",
+                ],
+                "claudecode",
+            ),
             (vec!["Cursor", "cursor", "CURSOR"], "cursor"),
             (vec!["Windsurf", "WINDSURF"], "windsurf"),
             // Cline is also marketed as "Roo Code" — sqz treats them
             // as one integration (same .clinerules file) so the
             // aliases must collapse.
-            (vec!["Cline", "cline", "Roo", "roo-code", "RooCode"], "cline"),
-            (vec!["Gemini CLI", "gemini-cli", "gemini", "GEMINI"], "gemini"),
-            (vec!["OpenCode", "open-code", "opencode", "OPENCODE"], "opencode"),
+            (
+                vec!["Cline", "cline", "Roo", "roo-code", "RooCode"],
+                "cline",
+            ),
+            (
+                vec!["Gemini CLI", "gemini-cli", "gemini", "GEMINI"],
+                "gemini",
+            ),
+            (
+                vec!["OpenCode", "open-code", "opencode", "OPENCODE"],
+                "opencode",
+            ),
             (vec!["Codex", "codex"], "codex"),
         ] {
             for alias in &aliases.0 {
@@ -2425,8 +2708,14 @@ mod issue_11_tool_filter_tests {
             msg.contains("unknown agent name 'opncode'"),
             "error must quote the bad input: {msg}"
         );
-        assert!(msg.contains("opencode"), "error must list valid options: {msg}");
-        assert!(msg.contains("cursor"), "error must list valid options: {msg}");
+        assert!(
+            msg.contains("opencode"),
+            "error must list valid options: {msg}"
+        );
+        assert!(
+            msg.contains("cursor"),
+            "error must list valid options: {msg}"
+        );
     }
 
     #[test]
@@ -2455,10 +2744,7 @@ mod issue_11_tool_filter_tests {
     fn tool_filter_all_includes_every_supported_tool() {
         let filter = ToolFilter::All;
         for tool in SUPPORTED_TOOL_NAMES {
-            assert!(
-                filter.includes(tool),
-                "default filter must include {tool}"
-            );
+            assert!(filter.includes(tool), "default filter must include {tool}");
         }
     }
 
@@ -2567,12 +2853,8 @@ mod issue_11_tool_filter_tests {
         // rules, no Gemini settings, no AGENTS.md, no .claude/.
         let dir = tempfile::tempdir().unwrap();
         let filter = ToolFilter::Only(vec!["opencode".to_string()]);
-        let _installed = install_tool_hooks_scoped_filtered(
-            dir.path(),
-            "sqz",
-            InstallScope::Project,
-            &filter,
-        );
+        let _installed =
+            install_tool_hooks_scoped_filtered(dir.path(), "sqz", InstallScope::Project, &filter);
 
         // OpenCode SHOULD be there.
         assert!(
@@ -2601,12 +2883,8 @@ mod issue_11_tool_filter_tests {
         // Symmetric: --skip cursor should leave everything else intact.
         let dir = tempfile::tempdir().unwrap();
         let filter = ToolFilter::Skip(vec!["cursor".to_string()]);
-        let _installed = install_tool_hooks_scoped_filtered(
-            dir.path(),
-            "sqz",
-            InstallScope::Project,
-            &filter,
-        );
+        let _installed =
+            install_tool_hooks_scoped_filtered(dir.path(), "sqz", InstallScope::Project, &filter);
 
         // Cursor rules must NOT exist.
         assert!(
@@ -2624,4 +2902,3 @@ mod issue_11_tool_filter_tests {
         );
     }
 }
-

@@ -147,7 +147,10 @@ pub(crate) fn apply_schema(conn: &Connection) -> rusqlite::Result<()> {
         .query_row([], |_| Ok(()))
         .is_ok();
     if !has_project_dir {
-        conn.execute("ALTER TABLE compression_log ADD COLUMN project_dir TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE compression_log ADD COLUMN project_dir TEXT",
+            [],
+        )?;
     }
 
     Ok(())
@@ -215,8 +218,9 @@ impl SessionStore {
                 if path.exists() {
                     let _ = std::fs::remove_file(path);
                 }
-                let conn = open_connection(path)
-                    .map_err(|e2| SqzError::Other(format!("failed to create new session store: {e2}")))?;
+                let conn = open_connection(path).map_err(|e2| {
+                    SqzError::Other(format!("failed to create new session store: {e2}"))
+                })?;
                 Ok(Self { db: conn })
             }
         }
@@ -311,7 +315,13 @@ impl SessionStore {
         let mut results = Vec::new();
         for row in rows {
             let (id, project_dir, compressed_summary, created_at, updated_at) = row?;
-            results.push(row_to_summary(id, project_dir, compressed_summary, created_at, updated_at)?);
+            results.push(row_to_summary(
+                id,
+                project_dir,
+                compressed_summary,
+                created_at,
+                updated_at,
+            )?);
         }
         Ok(results)
     }
@@ -342,34 +352,52 @@ impl SessionStore {
         let mut results = Vec::new();
         for row in rows {
             let (id, project_dir, compressed_summary, created_at, updated_at) = row?;
-            results.push(row_to_summary(id, project_dir, compressed_summary, created_at, updated_at)?);
+            results.push(row_to_summary(
+                id,
+                project_dir,
+                compressed_summary,
+                created_at,
+                updated_at,
+            )?);
         }
         Ok(results)
     }
 
     /// Return the most recently updated session, or `None` if no sessions exist.
     pub fn latest_session(&self) -> Result<Option<SessionSummary>> {
-        let mut stmt = self.db.prepare(
-            r#"SELECT id, project_dir, compressed_summary, created_at, updated_at
+        let mut stmt = self
+            .db
+            .prepare(
+                r#"SELECT id, project_dir, compressed_summary, created_at, updated_at
                FROM sessions
                ORDER BY updated_at DESC
                LIMIT 1"#,
-        ).map_err(SqzError::SessionStore)?;
+            )
+            .map_err(SqzError::SessionStore)?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        }).map_err(SqzError::SessionStore)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(SqzError::SessionStore)?;
 
-        for row in rows {
+        let mut rows = rows;
+        if let Some(row) = rows.next() {
             let (id, project_dir, compressed_summary, created_at, updated_at) =
                 row.map_err(SqzError::SessionStore)?;
-            return Ok(Some(row_to_summary(id, project_dir, compressed_summary, created_at, updated_at)?));
+            return Ok(Some(row_to_summary(
+                id,
+                project_dir,
+                compressed_summary,
+                created_at,
+                updated_at,
+            )?));
         }
         Ok(None)
     }
@@ -397,7 +425,13 @@ impl SessionStore {
         let mut results = Vec::new();
         for row in rows {
             let (id, project_dir, compressed_summary, created_at, updated_at) = row?;
-            results.push(row_to_summary(id, project_dir, compressed_summary, created_at, updated_at)?);
+            results.push(row_to_summary(
+                id,
+                project_dir,
+                compressed_summary,
+                created_at,
+                updated_at,
+            )?);
         }
         Ok(results)
     }
@@ -471,10 +505,8 @@ impl SessionStore {
 
     /// Delete a cache entry by content hash.
     pub fn delete_cache_entry(&self, hash: &str) -> Result<()> {
-        self.db.execute(
-            "DELETE FROM cache_entries WHERE hash = ?1",
-            params![hash],
-        )?;
+        self.db
+            .execute("DELETE FROM cache_entries WHERE hash = ?1", params![hash])?;
         Ok(())
     }
 
@@ -482,9 +514,9 @@ impl SessionStore {
     /// as `(hash, size_bytes)` pairs where `size_bytes` is the byte length of
     /// the stored JSON data.
     pub fn list_cache_entries_lru(&self) -> Result<Vec<(String, u64)>> {
-        let mut stmt = self.db.prepare(
-            "SELECT hash, length(data) FROM cache_entries ORDER BY accessed_at ASC",
-        )?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT hash, length(data) FROM cache_entries ORDER BY accessed_at ASC")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -547,7 +579,11 @@ impl SessionStore {
         // we emit are always lowercase so there's no reason to case-fold
         // here; accidentally matching uppercase input would also match
         // unrelated entries if someone hand-crafted a collision.
-        if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        if prefix.is_empty()
+            || !prefix
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
             return Ok(None);
         }
         let pattern = format!("{prefix}%");
@@ -696,13 +732,15 @@ impl SessionStore {
             "SELECT COUNT(*), COALESCE(SUM(tokens_original), 0), COALESCE(SUM(tokens_compressed), 0) FROM compression_log",
         ).map_err(SqzError::SessionStore)?;
 
-        let stats = stmt.query_row([], |row| {
-            Ok(CompressionStats {
-                total_compressions: row.get::<_, u32>(0)?,
-                total_tokens_in: row.get::<_, u64>(1)?,
-                total_tokens_out: row.get::<_, u64>(2)?,
+        let stats = stmt
+            .query_row([], |row| {
+                Ok(CompressionStats {
+                    total_compressions: row.get::<_, u32>(0)?,
+                    total_tokens_in: row.get::<_, u64>(1)?,
+                    total_tokens_out: row.get::<_, u64>(2)?,
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         Ok(stats)
     }
@@ -717,16 +755,18 @@ impl SessionStore {
         ).map_err(SqzError::SessionStore)?;
 
         let offset = format!("-{days} days");
-        let rows = stmt.query_map(params![offset], |row| {
-            let tokens_in: u64 = row.get(2)?;
-            let tokens_out: u64 = row.get(3)?;
-            Ok(DailyGain {
-                date: row.get(0)?,
-                compressions: row.get(1)?,
-                tokens_in,
-                tokens_saved: tokens_in.saturating_sub(tokens_out),
+        let rows = stmt
+            .query_map(params![offset], |row| {
+                let tokens_in: u64 = row.get(2)?;
+                let tokens_out: u64 = row.get(3)?;
+                Ok(DailyGain {
+                    date: row.get(0)?,
+                    compressions: row.get(1)?,
+                    tokens_in,
+                    tokens_saved: tokens_in.saturating_sub(tokens_out),
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         let mut gains = Vec::new();
         for row in rows {
@@ -742,13 +782,15 @@ impl SessionStore {
              FROM compression_log WHERE project_dir = ?1",
         ).map_err(SqzError::SessionStore)?;
 
-        let stats = stmt.query_row(params![project_dir], |row| {
-            Ok(CompressionStats {
-                total_compressions: row.get::<_, u32>(0)?,
-                total_tokens_in: row.get::<_, u64>(1)?,
-                total_tokens_out: row.get::<_, u64>(2)?,
+        let stats = stmt
+            .query_row(params![project_dir], |row| {
+                Ok(CompressionStats {
+                    total_compressions: row.get::<_, u32>(0)?,
+                    total_tokens_in: row.get::<_, u64>(1)?,
+                    total_tokens_out: row.get::<_, u64>(2)?,
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         Ok(stats)
     }
@@ -763,16 +805,18 @@ impl SessionStore {
         ).map_err(SqzError::SessionStore)?;
 
         let offset = format!("-{days} days");
-        let rows = stmt.query_map(params![offset, project_dir], |row| {
-            let tokens_in: u64 = row.get(2)?;
-            let tokens_out: u64 = row.get(3)?;
-            Ok(DailyGain {
-                date: row.get(0)?,
-                compressions: row.get(1)?,
-                tokens_in,
-                tokens_saved: tokens_in.saturating_sub(tokens_out),
+        let rows = stmt
+            .query_map(params![offset, project_dir], |row| {
+                let tokens_in: u64 = row.get(2)?;
+                let tokens_out: u64 = row.get(3)?;
+                Ok(DailyGain {
+                    date: row.get(0)?,
+                    compressions: row.get(1)?,
+                    tokens_in,
+                    tokens_saved: tokens_in.saturating_sub(tokens_out),
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         let mut gains = Vec::new();
         for row in rows {
@@ -791,13 +835,15 @@ impl SessionStore {
              ORDER BY COUNT(*) DESC",
         ).map_err(SqzError::SessionStore)?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, u32>(1)?,
-                row.get::<_, u64>(2)?,
-            ))
-        }).map_err(SqzError::SessionStore)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, u64>(2)?,
+                ))
+            })
+            .map_err(SqzError::SessionStore)?;
 
         let mut projects = Vec::new();
         for row in rows {
@@ -810,25 +856,30 @@ impl SessionStore {
     /// total tokens consumed, with compression stats for each.
     /// Used by `sqz stats --breakdown` to show where tokens are going.
     pub fn command_breakdown(&self, limit: u32) -> Result<Vec<CommandStats>> {
-        let mut stmt = self.db.prepare(
-            "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
              FROM compression_log \
              GROUP BY mode \
              ORDER BY SUM(tokens_original) DESC \
              LIMIT ?1",
-        ).map_err(SqzError::SessionStore)?;
+            )
+            .map_err(SqzError::SessionStore)?;
 
-        let rows = stmt.query_map(params![limit], |row| {
-            let tokens_in: u64 = row.get(2)?;
-            let tokens_out: u64 = row.get(3)?;
-            Ok(CommandStats {
-                command: row.get(0)?,
-                invocations: row.get(1)?,
-                tokens_in,
-                tokens_out,
-                tokens_saved: tokens_in.saturating_sub(tokens_out),
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                let tokens_in: u64 = row.get(2)?;
+                let tokens_out: u64 = row.get(3)?;
+                Ok(CommandStats {
+                    command: row.get(0)?,
+                    invocations: row.get(1)?,
+                    tokens_in,
+                    tokens_out,
+                    tokens_saved: tokens_in.saturating_sub(tokens_out),
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -838,27 +889,36 @@ impl SessionStore {
     }
 
     /// Per-command breakdown filtered to a specific project.
-    pub fn command_breakdown_for_project(&self, limit: u32, project_dir: &str) -> Result<Vec<CommandStats>> {
-        let mut stmt = self.db.prepare(
-            "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
+    pub fn command_breakdown_for_project(
+        &self,
+        limit: u32,
+        project_dir: &str,
+    ) -> Result<Vec<CommandStats>> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT mode, COUNT(*), SUM(tokens_original), SUM(tokens_compressed) \
              FROM compression_log \
              WHERE project_dir = ?1 \
              GROUP BY mode \
              ORDER BY SUM(tokens_original) DESC \
              LIMIT ?2",
-        ).map_err(SqzError::SessionStore)?;
+            )
+            .map_err(SqzError::SessionStore)?;
 
-        let rows = stmt.query_map(params![project_dir, limit], |row| {
-            let tokens_in: u64 = row.get(2)?;
-            let tokens_out: u64 = row.get(3)?;
-            Ok(CommandStats {
-                command: row.get(0)?,
-                invocations: row.get(1)?,
-                tokens_in,
-                tokens_out,
-                tokens_saved: tokens_in.saturating_sub(tokens_out),
+        let rows = stmt
+            .query_map(params![project_dir, limit], |row| {
+                let tokens_in: u64 = row.get(2)?;
+                let tokens_out: u64 = row.get(3)?;
+                Ok(CommandStats {
+                    command: row.get(0)?,
+                    invocations: row.get(1)?,
+                    tokens_in,
+                    tokens_out,
+                    tokens_saved: tokens_in.saturating_sub(tokens_out),
+                })
             })
-        }).map_err(SqzError::SessionStore)?;
+            .map_err(SqzError::SessionStore)?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -871,16 +931,19 @@ impl SessionStore {
     /// compaction or start). Used by the adaptive pressure system to
     /// decide whether to escalate compression intensity.
     pub fn session_pressure(&self, since_minutes: u32) -> Result<u64> {
-        let mut stmt = self.db.prepare(
-            "SELECT COALESCE(SUM(tokens_compressed), 0) \
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT COALESCE(SUM(tokens_compressed), 0) \
              FROM compression_log \
              WHERE created_at >= datetime('now', ?1)",
-        ).map_err(SqzError::SessionStore)?;
+            )
+            .map_err(SqzError::SessionStore)?;
 
         let offset = format!("-{since_minutes} minutes");
-        let total: u64 = stmt.query_row(params![offset], |row| {
-            row.get(0)
-        }).map_err(SqzError::SessionStore)?;
+        let total: u64 = stmt
+            .query_row(params![offset], |row| row.get(0))
+            .map_err(SqzError::SessionStore)?;
 
         Ok(total)
     }
@@ -891,22 +954,25 @@ impl SessionStore {
     /// Used by cross-command context refs to annotate error messages.
     pub fn add_known_file(&self, path: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.db.execute(
-            "INSERT OR REPLACE INTO known_files (path, added_at) VALUES (?1, ?2)",
-            params![path, now],
-        ).map_err(SqzError::SessionStore)?;
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO known_files (path, added_at) VALUES (?1, ?2)",
+                params![path, now],
+            )
+            .map_err(SqzError::SessionStore)?;
         Ok(())
     }
 
     /// Load all known file paths from the persistent store.
     pub fn known_files(&self) -> Result<Vec<String>> {
-        let mut stmt = self.db.prepare(
-            "SELECT path FROM known_files ORDER BY added_at DESC",
-        ).map_err(SqzError::SessionStore)?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT path FROM known_files ORDER BY added_at DESC")
+            .map_err(SqzError::SessionStore)?;
 
-        let rows = stmt.query_map([], |row| {
-            row.get::<_, String>(0)
-        }).map_err(SqzError::SessionStore)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(SqzError::SessionStore)?;
 
         let mut files = Vec::new();
         for row in rows {
@@ -924,18 +990,24 @@ impl SessionStore {
 
     /// Number of entries currently in the dedup cache.
     pub fn cache_entry_count(&self) -> Result<u64> {
-        self.db.query_row(
-            "SELECT COUNT(*) FROM cache_entries", [],
-            |row| row.get(0),
-        ).map_err(SqzError::SessionStore)
+        self.db
+            .query_row("SELECT COUNT(*) FROM cache_entries", [], |row| row.get(0))
+            .map_err(SqzError::SessionStore)
     }
 
     /// Increment the cache-hit counter (persisted in metadata).
     pub fn record_cache_hit(&self) -> Result<()> {
-        let count: u64 = self.db.query_row(
-            "SELECT value FROM metadata WHERE key = 'cache_hits'", [],
-            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
-        ).unwrap_or(0);
+        let count: u64 = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'cache_hits'",
+                [],
+                |row| {
+                    row.get::<_, String>(0)
+                        .map(|s| s.parse::<u64>().unwrap_or(0))
+                },
+            )
+            .unwrap_or(0);
         let new = count + 1;
         self.db.execute(
             "INSERT OR REPLACE INTO metadata (key, value) VALUES ('cache_hits', ?1)",
@@ -946,10 +1018,17 @@ impl SessionStore {
 
     /// Increment the cache-miss counter (persisted in metadata).
     pub fn record_cache_miss(&self) -> Result<()> {
-        let count: u64 = self.db.query_row(
-            "SELECT value FROM metadata WHERE key = 'cache_misses'", [],
-            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
-        ).unwrap_or(0);
+        let count: u64 = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'cache_misses'",
+                [],
+                |row| {
+                    row.get::<_, String>(0)
+                        .map(|s| s.parse::<u64>().unwrap_or(0))
+                },
+            )
+            .unwrap_or(0);
         let new = count + 1;
         self.db.execute(
             "INSERT OR REPLACE INTO metadata (key, value) VALUES ('cache_misses', ?1)",
@@ -960,14 +1039,28 @@ impl SessionStore {
 
     /// Return (cache_hits, cache_misses) from metadata counters.
     pub fn cache_hit_miss_counts(&self) -> Result<(u64, u64)> {
-        let hits: u64 = self.db.query_row(
-            "SELECT value FROM metadata WHERE key = 'cache_hits'", [],
-            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
-        ).unwrap_or(0);
-        let misses: u64 = self.db.query_row(
-            "SELECT value FROM metadata WHERE key = 'cache_misses'", [],
-            |row| row.get::<_, String>(0).map(|s| s.parse::<u64>().unwrap_or(0)),
-        ).unwrap_or(0);
+        let hits: u64 = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'cache_hits'",
+                [],
+                |row| {
+                    row.get::<_, String>(0)
+                        .map(|s| s.parse::<u64>().unwrap_or(0))
+                },
+            )
+            .unwrap_or(0);
+        let misses: u64 = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'cache_misses'",
+                [],
+                |row| {
+                    row.get::<_, String>(0)
+                        .map(|s| s.parse::<u64>().unwrap_or(0))
+                },
+            )
+            .unwrap_or(0);
         Ok((hits, misses))
     }
 
@@ -975,17 +1068,18 @@ impl SessionStore {
     /// as cache misses and compressed fresh. Does NOT clear compression
     /// stats or session history.
     pub fn clear_cache(&self) -> Result<u64> {
-        let count: u64 = self.db.query_row(
-            "SELECT COUNT(*) FROM cache_entries", [],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        self.db.execute("DELETE FROM cache_entries", [])
+        let count: u64 = self
+            .db
+            .query_row("SELECT COUNT(*) FROM cache_entries", [], |row| row.get(0))
+            .unwrap_or(0);
+        self.db
+            .execute("DELETE FROM cache_entries", [])
             .map_err(SqzError::SessionStore)?;
         // Also clear the compaction marker so freshness checks don't
         // reference timestamps from the deleted entries.
-        let _ = self.db.execute(
-            "DELETE FROM metadata WHERE key = 'last_compaction_at'", [],
-        );
+        let _ = self
+            .db
+            .execute("DELETE FROM metadata WHERE key = 'last_compaction_at'", []);
         Ok(count)
     }
 
@@ -993,37 +1087,53 @@ impl SessionStore {
     /// `sqz stats` and `sqz gain` will show zero until new compressions
     /// happen.
     pub fn clear_stats(&self) -> Result<u64> {
-        let count: u64 = self.db.query_row(
-            "SELECT COUNT(*) FROM compression_log", [],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        self.db.execute("DELETE FROM compression_log", [])
+        let count: u64 = self
+            .db
+            .query_row("SELECT COUNT(*) FROM compression_log", [], |row| row.get(0))
+            .unwrap_or(0);
+        self.db
+            .execute("DELETE FROM compression_log", [])
             .map_err(SqzError::SessionStore)?;
         Ok(count)
     }
 
     /// Clear compression stats for a specific project directory only.
     pub fn clear_stats_for_project(&self, project_dir: &str) -> Result<u64> {
-        let count: u64 = self.db.query_row(
-            "SELECT COUNT(*) FROM compression_log WHERE project_dir = ?1",
-            rusqlite::params![project_dir],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        self.db.execute(
-            "DELETE FROM compression_log WHERE project_dir = ?1",
-            rusqlite::params![project_dir],
-        ).map_err(SqzError::SessionStore)?;
+        let count: u64 = self
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM compression_log WHERE project_dir = ?1",
+                rusqlite::params![project_dir],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        self.db
+            .execute(
+                "DELETE FROM compression_log WHERE project_dir = ?1",
+                rusqlite::params![project_dir],
+            )
+            .map_err(SqzError::SessionStore)?;
         Ok(count)
     }
 
     /// Full reset: clear cache, stats, sessions, known files, and metadata.
     /// Equivalent to deleting sessions.db and letting sqz recreate it.
     pub fn reset_all(&self) -> Result<()> {
-        self.db.execute("DELETE FROM cache_entries", []).map_err(SqzError::SessionStore)?;
-        self.db.execute("DELETE FROM compression_log", []).map_err(SqzError::SessionStore)?;
-        self.db.execute("DELETE FROM sessions", []).map_err(SqzError::SessionStore)?;
-        self.db.execute("DELETE FROM known_files", []).map_err(SqzError::SessionStore)?;
-        self.db.execute("DELETE FROM metadata", []).map_err(SqzError::SessionStore)?;
+        self.db
+            .execute("DELETE FROM cache_entries", [])
+            .map_err(SqzError::SessionStore)?;
+        self.db
+            .execute("DELETE FROM compression_log", [])
+            .map_err(SqzError::SessionStore)?;
+        self.db
+            .execute("DELETE FROM sessions", [])
+            .map_err(SqzError::SessionStore)?;
+        self.db
+            .execute("DELETE FROM known_files", [])
+            .map_err(SqzError::SessionStore)?;
+        self.db
+            .execute("DELETE FROM metadata", [])
+            .map_err(SqzError::SessionStore)?;
         // VACUUM to reclaim disk space.
         let _ = self.db.execute("VACUUM", []);
         Ok(())
@@ -1103,7 +1213,7 @@ impl SessionStore {
         }
 
         let mut result: Vec<_> = tool_map.into_iter().collect();
-        result.sort_by(|a, b| b.1 .2.cmp(&a.1 .2));
+        result.sort_by_key(|b| std::cmp::Reverse(b.1 .2));
         Ok(result
             .into_iter()
             .map(|(name, (tin, tout, cnt))| (name, tin, tout, cnt))
@@ -1265,8 +1375,16 @@ mod tests {
     #[test]
     fn test_search_fts() {
         let store = in_memory_store();
-        store.save_session(&make_session("s1", "/proj", "REST API refactor with authentication")).unwrap();
-        store.save_session(&make_session("s2", "/proj", "database migration postgres")).unwrap();
+        store
+            .save_session(&make_session(
+                "s1",
+                "/proj",
+                "REST API refactor with authentication",
+            ))
+            .unwrap();
+        store
+            .save_session(&make_session("s2", "/proj", "database migration postgres"))
+            .unwrap();
 
         let results = store.search("authentication").unwrap();
         assert_eq!(results.len(), 1);
@@ -1280,7 +1398,9 @@ mod tests {
         let past = now - chrono::Duration::hours(2);
         let future = now + chrono::Duration::hours(2);
 
-        store.save_session(&make_session("s1", "/proj", "recent session")).unwrap();
+        store
+            .save_session(&make_session("s1", "/proj", "recent session"))
+            .unwrap();
 
         let results = store.search_by_date(past, future).unwrap();
         assert!(!results.is_empty());
@@ -1290,10 +1410,16 @@ mod tests {
     #[test]
     fn test_search_by_project() {
         let store = in_memory_store();
-        store.save_session(&make_session("s1", "/home/user/alpha", "alpha project")).unwrap();
-        store.save_session(&make_session("s2", "/home/user/beta", "beta project")).unwrap();
+        store
+            .save_session(&make_session("s1", "/home/user/alpha", "alpha project"))
+            .unwrap();
+        store
+            .save_session(&make_session("s2", "/home/user/beta", "beta project"))
+            .unwrap();
 
-        let results = store.search_by_project(Path::new("/home/user/alpha")).unwrap();
+        let results = store
+            .search_by_project(Path::new("/home/user/alpha"))
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "s1");
     }

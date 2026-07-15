@@ -42,7 +42,8 @@ impl DependencyMapper {
             .collect();
 
         // Insert forward edges
-        self.dependencies.insert(path.to_path_buf(), resolved.clone());
+        self.dependencies
+            .insert(path.to_path_buf(), resolved.clone());
 
         // Insert reverse edges
         for dep in &resolved {
@@ -110,18 +111,12 @@ impl DependencyMapper {
         let mut parts = Vec::new();
 
         if !deps.is_empty() {
-            let names: Vec<String> = deps
-                .iter()
-                .map(|p| short_name(p))
-                .collect();
+            let names: Vec<String> = deps.iter().map(|p| short_name(p)).collect();
             parts.push(format!("imports: {}", names.join(", ")));
         }
 
         if !revs.is_empty() {
-            let names: Vec<String> = revs
-                .iter()
-                .map(|p| short_name(p))
-                .collect();
+            let names: Vec<String> = revs.iter().map(|p| short_name(p)).collect();
             parts.push(format!("imported by: {}", names.join(", ")));
         }
 
@@ -568,8 +563,12 @@ import com.example.MyClass;
 "#;
         mapper.add_file(Path::new("src/Main.java"), source);
         let deps = mapper.dependencies_of(Path::new("src/Main.java"));
-        assert!(deps.iter().any(|p| p.to_string_lossy().contains("java/util/List")));
-        assert!(deps.iter().any(|p| p.to_string_lossy().contains("com/example/MyClass")));
+        assert!(deps
+            .iter()
+            .any(|p| p.to_string_lossy().contains("java/util/List")));
+        assert!(deps
+            .iter()
+            .any(|p| p.to_string_lossy().contains("com/example/MyClass")));
     }
 
     #[test]
@@ -608,7 +607,9 @@ using System.Collections.Generic;
         mapper.add_file(Path::new("src/Program.cs"), source);
         let deps = mapper.dependencies_of(Path::new("src/Program.cs"));
         assert!(deps.iter().any(|p| p.to_string_lossy() == "System"));
-        assert!(deps.iter().any(|p| p.to_string_lossy().contains("System/Collections/Generic")));
+        assert!(deps
+            .iter()
+            .any(|p| p.to_string_lossy().contains("System/Collections/Generic")));
     }
 
     #[test]
@@ -627,7 +628,9 @@ using System.Collections.Generic;
         let source = "import com.example.MyClass\nimport kotlin.collections.List\n";
         mapper.add_file(Path::new("src/Main.kt"), source);
         let deps = mapper.dependencies_of(Path::new("src/Main.kt"));
-        assert!(deps.iter().any(|p| p.to_string_lossy().contains("com/example/MyClass")));
+        assert!(deps
+            .iter()
+            .any(|p| p.to_string_lossy().contains("com/example/MyClass")));
     }
 
     #[test]
@@ -636,7 +639,9 @@ using System.Collections.Generic;
         let source = "@import 'reset.css';\n@import url('theme.css');\n";
         mapper.add_file(Path::new("styles/main.css"), source);
         let deps = mapper.dependencies_of(Path::new("styles/main.css"));
-        assert!(deps.iter().any(|p| p.to_string_lossy().contains("reset.css")));
+        assert!(deps
+            .iter()
+            .any(|p| p.to_string_lossy().contains("reset.css")));
     }
 
     #[test]
@@ -656,14 +661,8 @@ using System.Collections.Generic;
     fn test_reverse_dependencies() {
         let mut mapper = DependencyMapper::new();
 
-        mapper.add_file(
-            Path::new("src/a.rs"),
-            "use crate::shared;\n",
-        );
-        mapper.add_file(
-            Path::new("src/b.rs"),
-            "use crate::shared;\n",
-        );
+        mapper.add_file(Path::new("src/a.rs"), "use crate::shared;\n");
+        mapper.add_file(Path::new("src/b.rs"), "use crate::shared;\n");
 
         let revs = mapper.dependents_of(Path::new("src/shared"));
         assert_eq!(revs.len(), 2);
@@ -672,10 +671,7 @@ using System.Collections.Generic;
     #[test]
     fn test_remove_file_cleans_edges() {
         let mut mapper = DependencyMapper::new();
-        mapper.add_file(
-            Path::new("src/a.rs"),
-            "use crate::b;\n",
-        );
+        mapper.add_file(Path::new("src/a.rs"), "use crate::b;\n");
         assert!(!mapper.dependencies_of(Path::new("src/a.rs")).is_empty());
 
         mapper.remove_file(Path::new("src/a.rs"));
@@ -729,24 +725,72 @@ using System.Collections.Generic;
 
     #[test]
     fn test_detect_language_extensions() {
-        assert_eq!(detect_language(Path::new("foo.rs")).as_deref(), Some("rust"));
-        assert_eq!(detect_language(Path::new("foo.py")).as_deref(), Some("python"));
-        assert_eq!(detect_language(Path::new("foo.js")).as_deref(), Some("javascript"));
-        assert_eq!(detect_language(Path::new("foo.ts")).as_deref(), Some("typescript"));
+        assert_eq!(
+            detect_language(Path::new("foo.rs")).as_deref(),
+            Some("rust")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.py")).as_deref(),
+            Some("python")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.js")).as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.ts")).as_deref(),
+            Some("typescript")
+        );
         assert_eq!(detect_language(Path::new("foo.go")).as_deref(), Some("go"));
-        assert_eq!(detect_language(Path::new("foo.java")).as_deref(), Some("java"));
+        assert_eq!(
+            detect_language(Path::new("foo.java")).as_deref(),
+            Some("java")
+        );
         assert_eq!(detect_language(Path::new("foo.c")).as_deref(), Some("c"));
-        assert_eq!(detect_language(Path::new("foo.cpp")).as_deref(), Some("cpp"));
-        assert_eq!(detect_language(Path::new("foo.rb")).as_deref(), Some("ruby"));
-        assert_eq!(detect_language(Path::new("foo.cs")).as_deref(), Some("csharp"));
-        assert_eq!(detect_language(Path::new("foo.kt")).as_deref(), Some("kotlin"));
-        assert_eq!(detect_language(Path::new("foo.swift")).as_deref(), Some("swift"));
-        assert_eq!(detect_language(Path::new("foo.css")).as_deref(), Some("css"));
-        assert_eq!(detect_language(Path::new("foo.html")).as_deref(), Some("html"));
-        assert_eq!(detect_language(Path::new("foo.sh")).as_deref(), Some("bash"));
-        assert_eq!(detect_language(Path::new("foo.toml")).as_deref(), Some("toml"));
-        assert_eq!(detect_language(Path::new("foo.yaml")).as_deref(), Some("yaml"));
-        assert_eq!(detect_language(Path::new("foo.json")).as_deref(), Some("json"));
+        assert_eq!(
+            detect_language(Path::new("foo.cpp")).as_deref(),
+            Some("cpp")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.rb")).as_deref(),
+            Some("ruby")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.cs")).as_deref(),
+            Some("csharp")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.kt")).as_deref(),
+            Some("kotlin")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.swift")).as_deref(),
+            Some("swift")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.css")).as_deref(),
+            Some("css")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.html")).as_deref(),
+            Some("html")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.sh")).as_deref(),
+            Some("bash")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.toml")).as_deref(),
+            Some("toml")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.yaml")).as_deref(),
+            Some("yaml")
+        );
+        assert_eq!(
+            detect_language(Path::new("foo.json")).as_deref(),
+            Some("json")
+        );
         assert_eq!(detect_language(Path::new("foo.xyz")), None);
     }
 

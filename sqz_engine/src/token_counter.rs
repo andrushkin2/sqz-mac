@@ -215,7 +215,7 @@ mod tests {
             prop_assert!(fast > 0.0);
             let ratio = exact / fast;
             prop_assert!(
-                ratio >= 0.1 && ratio <= 10.0,
+                (0.1..=10.0).contains(&ratio),
                 "exact/fast ratio ({:.2}) out of reasonable range [0.1, 10.0]; exact={}, fast={}",
                 ratio,
                 exact,

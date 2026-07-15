@@ -8,7 +8,9 @@ pub struct ContextWindow {
 
 impl ContextWindow {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 }
 
@@ -21,7 +23,9 @@ impl Default for ContextWindow {
 impl CorrectionLog {
     /// Create a new, empty CorrectionLog.
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Append a new entry to the log. Returns the entry's id.

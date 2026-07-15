@@ -12,8 +12,8 @@
 //! - Python
 //! - JavaScript
 
-use tree_sitter::{Language, Parser, Node};
 use crate::error::{Result, SqzError};
+use tree_sitter::{Language, Node, Parser};
 
 /// Compress source code by collapsing low-entropy parse tree subtrees.
 ///
@@ -121,10 +121,7 @@ pub fn char_entropy(text: &str) -> f64 {
 
 /// Extract the first line of a node's text as its "signature".
 fn signature_line(text: &str) -> String {
-    text.lines()
-        .next()
-        .unwrap_or("")
-        .to_string()
+    text.lines().next().unwrap_or("").to_string()
 }
 
 /// Compute the median entropy from a list of (start, end, entropy) tuples.
@@ -132,7 +129,7 @@ fn compute_median_entropy(entries: &[(usize, usize, f64)]) -> f64 {
     let mut entropies: Vec<f64> = entries.iter().map(|(_, _, e)| *e).collect();
     entropies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = entropies.len() / 2;
-    if entropies.len() % 2 == 0 && entropies.len() >= 2 {
+    if entropies.len().is_multiple_of(2) && entropies.len() >= 2 {
         (entropies[mid - 1] + entropies[mid]) / 2.0
     } else {
         entropies[mid]
@@ -152,10 +149,7 @@ fn get_language(language: &str) -> Result<Language> {
 /// Recursively collect entropy for all named children of a node.
 /// Returns a flat list of (node_kind, start_byte, end_byte, entropy).
 #[allow(dead_code)]
-fn collect_node_entropies<'a>(
-    node: &Node<'a>,
-    source: &str,
-) -> Vec<(String, usize, usize, f64)> {
+fn collect_node_entropies<'a>(node: &Node<'a>, source: &str) -> Vec<(String, usize, usize, f64)> {
     let mut results = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -318,7 +312,7 @@ class DataProcessor {
         /// Entropy of a single repeated byte is always 0.
         #[test]
         fn prop_entropy_uniform_is_zero(c in 0x20u8..0x7F, n in 1usize..100) {
-            let text: String = std::iter::repeat(c as char).take(n).collect();
+            let text: String = std::iter::repeat_n(c as char, n).collect();
             let e = char_entropy(&text);
             prop_assert!(
                 e.abs() < f64::EPSILON,

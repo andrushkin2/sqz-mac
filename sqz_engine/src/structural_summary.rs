@@ -27,7 +27,6 @@
 /// imports: pipeline, cache_manager, verifier
 /// imported by: main, cli_proxy
 /// ```
-
 use std::collections::{HashMap, HashSet};
 
 use crate::ast_parser::{AstParser, CodeSummary};
@@ -118,17 +117,19 @@ pub fn summarize(
     }
 
     let parser = AstParser::new();
-    let code_summary = parser.extract_signatures(source, language).unwrap_or_else(|_| {
-        // Fallback: regex-based extraction for unsupported languages
-        CodeSummary {
-            imports: Vec::new(),
-            functions: Vec::new(),
-            classes: Vec::new(),
-            types: Vec::new(),
-            tokens_original,
-            tokens_summary: tokens_original,
-        }
-    });
+    let code_summary = parser
+        .extract_signatures(source, language)
+        .unwrap_or_else(|_| {
+            // Fallback: regex-based extraction for unsupported languages
+            CodeSummary {
+                imports: Vec::new(),
+                functions: Vec::new(),
+                classes: Vec::new(),
+                types: Vec::new(),
+                tokens_original,
+                tokens_summary: tokens_original,
+            }
+        });
 
     // Extract call relationships
     let call_graph = if config.include_calls {
@@ -280,10 +281,7 @@ pub fn summarize_multi(
 /// 3. Qualified call matching (`module::function(`)
 ///
 /// Returns a map: caller_name → [callee_names]
-fn extract_call_graph(
-    source: &str,
-    code_summary: &CodeSummary,
-) -> HashMap<String, Vec<String>> {
+fn extract_call_graph(source: &str, code_summary: &CodeSummary) -> HashMap<String, Vec<String>> {
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
 
     // Build a set of known function/method names for matching
@@ -312,8 +310,9 @@ fn extract_call_graph(
         // Don't include self-references
         seen.insert(func_name.clone());
 
-        for line_idx in *start..*end.min(&lines.len()) {
-            let line = lines[line_idx].trim();
+        let range_end = (*end).min(lines.len());
+        for line in lines.iter().take(range_end).skip(*start) {
+            let line = line.trim();
 
             // Skip comments
             if line.starts_with("//") || line.starts_with('#') || line.starts_with("/*") {
@@ -414,7 +413,11 @@ fn find_function_boundaries(
         };
 
         for (i, line) in lines.iter().enumerate() {
-            if line.trim().starts_with(sig_prefix.trim()) || line.contains(&format!("fn {}", func.name)) || line.contains(&format!("def {}", func.name)) || line.contains(&format!("function {}", func.name)) {
+            if line.trim().starts_with(sig_prefix.trim())
+                || line.contains(&format!("fn {}", func.name))
+                || line.contains(&format!("def {}", func.name))
+                || line.contains(&format!("function {}", func.name))
+            {
                 func_starts.push((func.name.clone(), i));
                 break;
             }
@@ -582,7 +585,9 @@ def standalone(x: int) -> int:
         let result = summarize(source, "python", "services/user.py", &config, None).unwrap();
 
         assert!(result.summary.contains("## imports"));
-        assert!(result.summary.contains("## types") || result.summary.contains("class UserService"));
+        assert!(
+            result.summary.contains("## types") || result.summary.contains("class UserService")
+        );
         assert!(result.summary.contains("## functions"));
         assert!(result.tokens_summary < result.tokens_original);
     }
@@ -635,20 +640,11 @@ export default UserList;
             std::path::Path::new("src/engine.rs"),
             "use crate::pipeline;\nuse crate::cache;\n",
         );
-        mapper.add_file(
-            std::path::Path::new("src/main.rs"),
-            "use crate::engine;\n",
-        );
+        mapper.add_file(std::path::Path::new("src/main.rs"), "use crate::engine;\n");
 
         let config = SummaryConfig::default();
-        let result = summarize(
-            RUST_SOURCE,
-            "rust",
-            "src/engine.rs",
-            &config,
-            Some(&mapper),
-        )
-        .unwrap();
+        let result =
+            summarize(RUST_SOURCE, "rust", "src/engine.rs", &config, Some(&mapper)).unwrap();
 
         assert!(result.summary.contains("## dependencies"));
     }
@@ -733,10 +729,7 @@ export default UserList;
         let summary = parser.extract_signatures(RUST_SOURCE, "rust").unwrap();
         let boundaries = find_function_boundaries(RUST_SOURCE, &summary);
 
-        assert!(
-            !boundaries.is_empty(),
-            "should find function boundaries"
-        );
+        assert!(!boundaries.is_empty(), "should find function boundaries");
         // Each boundary should have start < end
         for (name, start, end) in &boundaries {
             assert!(

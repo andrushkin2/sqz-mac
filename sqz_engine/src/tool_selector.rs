@@ -45,7 +45,10 @@ fn tokenize(text: &str) -> BagOfWords {
 /// Tokenize into a frequency map (term → count) for TF-IDF.
 fn tokenize_tf(text: &str) -> HashMap<String, u32> {
     let mut freq = HashMap::new();
-    for word in text.split(|c: char| !c.is_alphanumeric()).filter(|s| !s.is_empty()) {
+    for word in text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+    {
         *freq.entry(word.to_lowercase()).or_insert(0) += 1;
     }
     freq
@@ -259,7 +262,10 @@ impl ToolSelector {
             self.tool_ids
                 .iter()
                 .map(|id| {
-                    let bag = self.bags.get(id).expect("bag must exist for registered tool");
+                    let bag = self
+                        .bags
+                        .get(id)
+                        .expect("bag must exist for registered tool");
                     let score = jaccard(&intent_bag, bag);
                     (score, id)
                 })
@@ -471,7 +477,8 @@ mod tests {
             ToolDefinition {
                 id: "specific".to_string(),
                 name: "Specific".to_string(),
-                description: "this tool performs kubernetes pod deployment orchestration".to_string(),
+                description: "this tool performs kubernetes pod deployment orchestration"
+                    .to_string(),
                 ..Default::default()
             },
             ToolDefinition {
@@ -559,12 +566,18 @@ mod tests {
 
     /// Strategy: generate a tool count in [5, 20] and an intent string.
     fn arb_tool_count_and_intent() -> impl Strategy<Value = (usize, String)> {
-        (5usize..=20usize, "[a-z ]{5,40}".prop_map(|s| s.trim().to_string()))
+        (
+            5usize..=20usize,
+            "[a-z ]{5,40}".prop_map(|s| s.trim().to_string()),
+        )
     }
 
     /// Strategy: generate a small tool count in [1, 4] and an intent string.
     fn arb_small_tool_count_and_intent() -> impl Strategy<Value = (usize, String)> {
-        (1usize..=4usize, "[a-z ]{5,40}".prop_map(|s| s.trim().to_string()))
+        (
+            1usize..=4usize,
+            "[a-z ]{5,40}".prop_map(|s| s.trim().to_string()),
+        )
     }
 
     proptest! {

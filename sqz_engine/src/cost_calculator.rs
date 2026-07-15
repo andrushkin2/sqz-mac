@@ -183,10 +183,8 @@ impl CostCalculator {
 
             // Estimate cache savings from the record's stored cost vs full price.
             if let Some(p) = pricing {
-                let full_input_cost =
-                    (record.tokens_input as f64 / 1_000.0) * p.input_per_1k;
-                let full_output_cost =
-                    (record.tokens_output as f64 / 1_000.0) * p.output_per_1k;
+                let full_input_cost = (record.tokens_input as f64 / 1_000.0) * p.input_per_1k;
+                let full_output_cost = (record.tokens_output as f64 / 1_000.0) * p.output_per_1k;
                 let full_cost = full_input_cost + full_output_cost;
                 if full_cost > record.cost_usd {
                     cache_savings_usd += full_cost - record.cost_usd;
@@ -197,11 +195,7 @@ impl CostCalculator {
         // Compression savings: tokens saved × input rate.
         // We approximate from the conversation: original tokens vs consumed.
         let compression_savings_usd = if let Some(p) = pricing {
-            let original_tokens: u32 = session
-                .conversation
-                .iter()
-                .map(|t| t.tokens)
-                .sum();
+            let original_tokens: u32 = session.conversation.iter().map(|t| t.tokens).sum();
             let consumed = session.budget.consumed;
             if original_tokens > consumed {
                 let saved = original_tokens - consumed;

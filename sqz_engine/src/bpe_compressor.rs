@@ -7,7 +7,6 @@
 ///
 /// This is the same algorithm that GPT tokenizers use, but applied to
 /// compress content before it reaches the tokenizer.
-
 use std::collections::HashMap;
 
 use crate::error::Result;
@@ -60,10 +59,7 @@ pub struct BpeResult {
 /// this operates on whitespace-separated tokens and merges frequently
 /// co-occurring token pairs into single symbols.
 pub fn bpe_compress(text: &str, config: &BpeConfig) -> Result<BpeResult> {
-    let mut tokens: Vec<String> = text
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    let mut tokens: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
 
     if tokens.len() < 2 {
         return Ok(BpeResult {
@@ -74,9 +70,8 @@ pub fn bpe_compress(text: &str, config: &BpeConfig) -> Result<BpeResult> {
     }
 
     let mut merges = Vec::new();
-    let mut merge_idx = 0u32;
 
-    for _ in 0..config.max_merges {
+    for merge_idx in 0..config.max_merges {
         // Count all adjacent pairs
         let mut pair_counts: HashMap<(String, String), usize> = HashMap::new();
         for window in tokens.windows(2) {
@@ -97,7 +92,6 @@ pub fn bpe_compress(text: &str, config: &BpeConfig) -> Result<BpeResult> {
 
         // Create a merge symbol
         let symbol = format!("§{}§", merge_idx);
-        merge_idx += 1;
 
         let left = best_pair.0.clone();
         let right = best_pair.1.clone();

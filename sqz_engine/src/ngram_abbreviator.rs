@@ -7,7 +7,6 @@
 /// For a phrase of length L tokens appearing K times, savings are:
 ///   (K-1) × L - (legend_cost + K × abbrev_cost)
 /// Profitable when K > (legend_cost + abbrev_cost) / (L - abbrev_cost).
-
 use std::collections::HashMap;
 
 use crate::error::Result;
@@ -402,8 +401,7 @@ mod tests {
                 max_abbreviations: 20,
             });
 
-            let text = std::iter::repeat(phrase.as_str())
-                .take(repeat)
+            let text = std::iter::repeat_n(phrase.as_str(), repeat)
                 .collect::<Vec<_>>()
                 .join(". ");
 

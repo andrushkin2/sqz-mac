@@ -72,7 +72,8 @@ pub fn agents_md_path(project_dir: &Path) -> PathBuf {
 // content. Matches the pattern we already use for shell RC hooks in
 // sqz/src/shell_hook.rs.
 
-const AGENTS_MD_BEGIN: &str = "<!-- BEGIN sqz-agents-guidance (auto-installed by sqz init; remove this block to disable) -->";
+const AGENTS_MD_BEGIN: &str =
+    "<!-- BEGIN sqz-agents-guidance (auto-installed by sqz init; remove this block to disable) -->";
 const AGENTS_MD_END: &str = "<!-- END sqz-agents-guidance -->";
 
 /// Build the markdown block that sqz appends to `AGENTS.md`.
@@ -174,9 +175,8 @@ pub fn install_agents_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
     let block = agents_md_guidance_block(sqz_path);
 
     if path.exists() {
-        let existing = std::fs::read_to_string(&path).map_err(|e| {
-            SqzError::Other(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let existing = std::fs::read_to_string(&path)
+            .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
         if agents_md_has_sqz_block(&existing) {
             return Ok(false);
         }
@@ -190,9 +190,8 @@ pub fn install_agents_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
             new_content.push('\n');
         }
         new_content.push_str(&block);
-        std::fs::write(&path, new_content).map_err(|e| {
-            SqzError::Other(format!("failed to write {}: {e}", path.display()))
-        })?;
+        std::fs::write(&path, new_content)
+            .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
         return Ok(true);
     }
 
@@ -231,9 +230,8 @@ pub fn remove_agents_md_guidance(project_dir: &Path) -> Result<Option<(PathBuf, 
     if !path.exists() {
         return Ok(None);
     }
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        SqzError::Other(format!("failed to read {}: {e}", path.display()))
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
     if !agents_md_has_sqz_block(&content) {
         return Ok(Some((path, false)));
     }
@@ -279,15 +277,13 @@ pub fn remove_agents_md_guidance(project_dir: &Path) -> Result<Option<(PathBuf, 
     // AGENTS.md is worse than no file.
     let essentially_empty = is_essentially_empty_agents_md(&new_content);
     if essentially_empty {
-        std::fs::remove_file(&path).map_err(|e| {
-            SqzError::Other(format!("failed to remove {}: {e}", path.display()))
-        })?;
+        std::fs::remove_file(&path)
+            .map_err(|e| SqzError::Other(format!("failed to remove {}: {e}", path.display())))?;
         return Ok(Some((path, true)));
     }
 
-    std::fs::write(&path, new_content).map_err(|e| {
-        SqzError::Other(format!("failed to write {}: {e}", path.display()))
-    })?;
+    std::fs::write(&path, new_content)
+        .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     Ok(Some((path, true)))
 }
 
@@ -308,14 +304,10 @@ fn is_essentially_empty_agents_md(s: &str) -> bool {
         "See <https://agentsmd.io>.",
     ];
     let has_only_preamble = PREAMBLE_MARKERS.iter().all(|m| trimmed.contains(m))
-        && !trimmed
-            .lines()
-            .any(|l| {
-                let l = l.trim();
-                !l.is_empty()
-                    && !l.starts_with('#')
-                    && !PREAMBLE_MARKERS.iter().any(|m| l.contains(m))
-            });
+        && !trimmed.lines().any(|l| {
+            let l = l.trim();
+            !l.is_empty() && !l.starts_with('#') && !PREAMBLE_MARKERS.iter().any(|m| l.contains(m))
+        });
     has_only_preamble
 }
 
@@ -346,7 +338,19 @@ fn is_essentially_empty_agents_md(s: &str) -> bool {
 /// If the config file doesn't exist yet, it is created with only sqz's
 /// entry (and its parent `~/.codex/` directory is created on demand).
 pub fn install_codex_mcp_config() -> Result<bool> {
-    install_codex_mcp_config_at(None)
+    install_codex_mcp_config_at(None, "sqz-mcp")
+}
+
+/// Same as [`install_codex_mcp_config`], but registers `sqz_mcp_path` as
+/// the server's `command` instead of the bare `sqz-mcp` name.
+///
+/// Codex launches MCP servers directly (not through the user's login
+/// shell), so a bare `sqz-mcp` only resolves if it's on PATH. Callers
+/// should pass the sibling of the resolved `sqz` binary path (see `sqz
+/// init`) so the registered command works regardless of PATH
+/// configuration.
+pub fn install_codex_mcp_config_with_path(sqz_mcp_path: &str) -> Result<bool> {
+    install_codex_mcp_config_at(None, sqz_mcp_path)
 }
 
 /// Internal: home-dir-injectable counterpart used by tests. Avoids
@@ -354,7 +358,10 @@ pub fn install_codex_mcp_config() -> Result<bool> {
 /// HOME (e.g. the api_proxy property tests that open `~/.sqz/sessions.db`).
 /// See `claude_md_integration::install_claude_mcp_config_at` for the
 /// same pattern.
-pub(crate) fn install_codex_mcp_config_at(home_override: Option<&Path>) -> Result<bool> {
+pub(crate) fn install_codex_mcp_config_at(
+    home_override: Option<&Path>,
+    sqz_mcp_path: &str,
+) -> Result<bool> {
     let path = match home_override {
         Some(h) => h.join("config.toml"),
         None => codex_config_path(),
@@ -363,19 +370,15 @@ pub(crate) fn install_codex_mcp_config_at(home_override: Option<&Path>) -> Resul
     // Read or start from blank. We build on a toml_edit::DocumentMut so
     // any prior comments/whitespace survive the round-trip.
     let existing = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| {
-            SqzError::Other(format!("failed to read {}: {e}", path.display()))
-        })?
+        std::fs::read_to_string(&path)
+            .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?
     } else {
         String::new()
     };
 
     let mut doc: toml_edit::DocumentMut = existing
         .parse()
-        .map_err(|e| SqzError::Other(format!(
-            "failed to parse {} as TOML: {e}",
-            path.display()
-        )))?;
+        .map_err(|e| SqzError::Other(format!("failed to parse {} as TOML: {e}", path.display())))?;
 
     // Idempotency: if [mcp_servers.sqz].command is already set, skip.
     // We only check `command` (not just the table's presence) because a
@@ -410,45 +413,49 @@ pub(crate) fn install_codex_mcp_config_at(home_override: Option<&Path>) -> Resul
             toml_edit::Item::Table(t)
         })
         .as_table_mut()
-        .ok_or_else(|| SqzError::Other(format!(
-            "{}: `mcp_servers` is not a table — refusing to overwrite",
-            path.display()
-        )))?;
+        .ok_or_else(|| {
+            SqzError::Other(format!(
+                "{}: `mcp_servers` is not a table — refusing to overwrite",
+                path.display()
+            ))
+        })?;
 
     let sqz = mcp_servers
         .entry("sqz")
         .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()))
         .as_table_mut()
-        .ok_or_else(|| SqzError::Other(format!(
-            "{}: `mcp_servers.sqz` is not a table — refusing to overwrite",
-            path.display()
-        )))?;
+        .ok_or_else(|| {
+            SqzError::Other(format!(
+                "{}: `mcp_servers.sqz` is not a table — refusing to overwrite",
+                path.display()
+            ))
+        })?;
 
     // Populate the server's required fields. Only write keys the user
     // hasn't already set so a hand-tuned config survives re-runs.
     if !sqz.contains_key("command") {
-        sqz["command"] = toml_edit::value("sqz-mcp");
+        sqz["command"] = toml_edit::value(sqz_mcp_path);
     }
     if !sqz.contains_key("args") {
         let mut args = toml_edit::Array::new();
         args.push("--transport");
         args.push("stdio");
+        // Explicit even though it matches sqz-mcp's own default
+        // (`~/.sqz/presets`) — makes the config self-documenting and
+        // keeps it correct if the binary's default ever changes.
+        args.push("--preset-dir");
+        args.push(crate::tool_hooks::default_preset_dir_str().as_str());
         sqz["args"] = toml_edit::Item::Value(toml_edit::Value::Array(args));
     }
 
     // Make sure the parent directory exists.
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            SqzError::Other(format!(
-                "failed to create {}: {e}",
-                parent.display()
-            ))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| SqzError::Other(format!("failed to create {}: {e}", parent.display())))?;
     }
 
-    std::fs::write(&path, doc.to_string()).map_err(|e| {
-        SqzError::Other(format!("failed to write {}: {e}", path.display()))
-    })?;
+    std::fs::write(&path, doc.to_string())
+        .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     Ok(true)
 }
 
@@ -515,15 +522,13 @@ pub(crate) fn remove_codex_mcp_config_at(
     // If the whole document is empty now, remove the file.
     let doc_is_empty = doc.iter().count() == 0;
     if doc_is_empty {
-        std::fs::remove_file(&path).map_err(|e| {
-            SqzError::Other(format!("failed to remove {}: {e}", path.display()))
-        })?;
+        std::fs::remove_file(&path)
+            .map_err(|e| SqzError::Other(format!("failed to remove {}: {e}", path.display())))?;
         return Ok(Some((path, true)));
     }
 
-    std::fs::write(&path, doc.to_string()).map_err(|e| {
-        SqzError::Other(format!("failed to write {}: {e}", path.display()))
-    })?;
+    std::fs::write(&path, doc.to_string())
+        .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     Ok(Some((path, true)))
 }
 
@@ -576,20 +581,27 @@ mod tests {
         std::fs::write(
             &path,
             "# My project rules\n\nBe polite. Run tests before committing.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let created = install_agents_md_guidance(dir.path(), "sqz").unwrap();
         assert!(created);
 
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("# My project rules"),
-            "original heading must survive");
-        assert!(content.contains("Be polite. Run tests before committing."),
-            "original body must survive");
+        assert!(
+            content.contains("# My project rules"),
+            "original heading must survive"
+        );
+        assert!(
+            content.contains("Be polite. Run tests before committing."),
+            "original body must survive"
+        );
         let user_idx = content.find("Be polite").unwrap();
         let sqz_idx = content.find(AGENTS_MD_BEGIN).unwrap();
-        assert!(sqz_idx > user_idx,
-            "sqz's block must append after user content, not prepend");
+        assert!(
+            sqz_idx > user_idx,
+            "sqz's block must append after user content, not prepend"
+        );
     }
 
     #[test]
@@ -612,23 +624,29 @@ mod tests {
         std::fs::write(
             &path,
             "# My project rules\n\nBe polite. Run tests before committing.\n",
-        ).unwrap();
+        )
+        .unwrap();
         install_agents_md_guidance(dir.path(), "sqz").unwrap();
 
-        let (returned_path, changed) =
-            remove_agents_md_guidance(dir.path()).unwrap().unwrap();
+        let (returned_path, changed) = remove_agents_md_guidance(dir.path()).unwrap().unwrap();
         assert_eq!(returned_path, path);
         assert!(changed);
-        assert!(path.exists(),
-            "file must NOT be deleted — it has user content");
+        assert!(
+            path.exists(),
+            "file must NOT be deleted — it has user content"
+        );
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains(AGENTS_MD_BEGIN));
         assert!(!content.contains(AGENTS_MD_END));
-        assert!(content.contains("# My project rules"),
-            "user heading must survive the uninstall");
-        assert!(content.contains("Be polite. Run tests before committing."),
-            "user body must survive the uninstall");
+        assert!(
+            content.contains("# My project rules"),
+            "user heading must survive the uninstall"
+        );
+        assert!(
+            content.contains("Be polite. Run tests before committing."),
+            "user body must survive the uninstall"
+        );
     }
 
     #[test]
@@ -638,8 +656,7 @@ mod tests {
         let path = dir.path().join("AGENTS.md");
         assert!(path.exists());
 
-        let (_returned, changed) =
-            remove_agents_md_guidance(dir.path()).unwrap().unwrap();
+        let (_returned, changed) = remove_agents_md_guidance(dir.path()).unwrap().unwrap();
         assert!(changed);
         assert!(
             !path.exists(),
@@ -653,8 +670,7 @@ mod tests {
         let path = dir.path().join("AGENTS.md");
         std::fs::write(&path, "# User-authored, sqz never touched this.\n").unwrap();
 
-        let (returned_path, changed) =
-            remove_agents_md_guidance(dir.path()).unwrap().unwrap();
+        let (returned_path, changed) = remove_agents_md_guidance(dir.path()).unwrap().unwrap();
         assert_eq!(returned_path, path);
         assert!(!changed, "no sqz block means no change");
         assert!(path.exists(), "user file must be untouched");
@@ -672,17 +688,35 @@ mod tests {
     #[test]
     fn install_codex_mcp_config_creates_file_with_sqz_entry() {
         let dir = tempfile::tempdir().unwrap();
-        let created = install_codex_mcp_config_at(Some(dir.path())).unwrap();
+        let created = install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(created);
         let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(
             content.contains("[mcp_servers.sqz]"),
             "config.toml must contain [mcp_servers.sqz] header; got:\n{content}"
         );
-        assert!(content.contains("command = \"sqz-mcp\""),
-            "command must be sqz-mcp");
+        assert!(
+            content.contains("command = \"sqz-mcp\""),
+            "command must be sqz-mcp"
+        );
         assert!(content.contains("--transport"));
         assert!(content.contains("stdio"));
+    }
+
+    #[test]
+    fn install_codex_mcp_config_uses_resolved_sqz_mcp_path_not_bare_name() {
+        // Regression test: Codex launches MCP servers directly, not
+        // through the user's shell, so a bare "sqz-mcp" command silently
+        // fails to resolve unless it happens to be on PATH.
+        let dir = tempfile::tempdir().unwrap();
+        let created =
+            install_codex_mcp_config_at(Some(dir.path()), "/opt/sqz/bin/sqz-mcp").unwrap();
+        assert!(created);
+        let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(
+            content.contains("command = \"/opt/sqz/bin/sqz-mcp\""),
+            "command must be the resolved path; got:\n{content}"
+        );
     }
 
     #[test]
@@ -697,30 +731,41 @@ mod tests {
              [mcp_servers.other]\n\
              command = \"other-server\"\n\
              args = [\"--flag\"]\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let created = install_codex_mcp_config_at(Some(dir.path())).unwrap();
+        let created = install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(created);
 
         let after = std::fs::read_to_string(&cfg).unwrap();
-        assert!(after.contains("# User's existing Codex config"),
-            "comment must survive: {after}");
-        assert!(after.contains("model = \"gpt-5\""),
-            "top-level key must survive: {after}");
-        assert!(after.contains("[mcp_servers.other]"),
-            "existing server entry must survive: {after}");
-        assert!(after.contains("command = \"other-server\""),
-            "existing server command must survive: {after}");
-        assert!(after.contains("[mcp_servers.sqz]"),
-            "sqz entry must be added: {after}");
+        assert!(
+            after.contains("# User's existing Codex config"),
+            "comment must survive: {after}"
+        );
+        assert!(
+            after.contains("model = \"gpt-5\""),
+            "top-level key must survive: {after}"
+        );
+        assert!(
+            after.contains("[mcp_servers.other]"),
+            "existing server entry must survive: {after}"
+        );
+        assert!(
+            after.contains("command = \"other-server\""),
+            "existing server command must survive: {after}"
+        );
+        assert!(
+            after.contains("[mcp_servers.sqz]"),
+            "sqz entry must be added: {after}"
+        );
     }
 
     #[test]
     fn install_codex_mcp_config_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(install_codex_mcp_config_at(Some(dir.path())).unwrap());
+        assert!(install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap());
         assert!(
-            !install_codex_mcp_config_at(Some(dir.path())).unwrap(),
+            !install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap(),
             "second install with complete [mcp_servers.sqz] must be a no-op"
         );
     }
@@ -734,15 +779,23 @@ mod tests {
             "[mcp_servers.sqz]\n\
              command = \"/custom/path/sqz-mcp\"\n\
              args = [\"--transport\", \"sse\", \"--port\", \"3999\"]\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let changed = install_codex_mcp_config_at(Some(dir.path())).unwrap();
-        assert!(!changed, "existing complete entry must be idempotent-skipped");
+        let changed = install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
+        assert!(
+            !changed,
+            "existing complete entry must be idempotent-skipped"
+        );
         let after = std::fs::read_to_string(&cfg).unwrap();
-        assert!(after.contains("/custom/path/sqz-mcp"),
-            "user's custom command must survive re-init");
-        assert!(after.contains("\"sse\""),
-            "user's custom transport must survive");
+        assert!(
+            after.contains("/custom/path/sqz-mcp"),
+            "user's custom command must survive re-init"
+        );
+        assert!(
+            after.contains("\"sse\""),
+            "user's custom transport must survive"
+        );
     }
 
     #[test]
@@ -760,33 +813,48 @@ mod tests {
              [mcp_servers.sqz]\n\
              command = \"sqz-mcp\"\n\
              args = [\"--transport\", \"stdio\"]\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path())).unwrap().unwrap();
+        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path()))
+            .unwrap()
+            .unwrap();
         assert_eq!(path, cfg);
         assert!(changed);
 
         let after = std::fs::read_to_string(&cfg).unwrap();
-        assert!(after.contains("# keep this comment"),
-            "comment must survive: {after}");
-        assert!(after.contains("model = \"gpt-5\""),
-            "top-level key must survive: {after}");
-        assert!(after.contains("[mcp_servers.other]"),
-            "other server entry must survive: {after}");
-        assert!(!after.contains("[mcp_servers.sqz]"),
-            "sqz entry must be gone: {after}");
+        assert!(
+            after.contains("# keep this comment"),
+            "comment must survive: {after}"
+        );
+        assert!(
+            after.contains("model = \"gpt-5\""),
+            "top-level key must survive: {after}"
+        );
+        assert!(
+            after.contains("[mcp_servers.other]"),
+            "other server entry must survive: {after}"
+        );
+        assert!(
+            !after.contains("[mcp_servers.sqz]"),
+            "sqz entry must be gone: {after}"
+        );
     }
 
     #[test]
     fn remove_codex_mcp_config_deletes_file_when_sqz_was_the_only_entry() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
-        install_codex_mcp_config_at(Some(dir.path())).unwrap();
-        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path())).unwrap().unwrap();
+        install_codex_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
+        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path()))
+            .unwrap()
+            .unwrap();
         assert_eq!(path, cfg);
         assert!(changed);
-        assert!(!cfg.exists(),
-            "config.toml with only sqz must be deleted on uninstall");
+        assert!(
+            !cfg.exists(),
+            "config.toml with only sqz must be deleted on uninstall"
+        );
     }
 
     #[test]
@@ -801,7 +869,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         std::fs::write(&cfg, "[mcp_servers.other]\ncommand = \"x\"\n").unwrap();
-        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path())).unwrap().unwrap();
+        let (path, changed) = remove_codex_mcp_config_at(Some(dir.path()))
+            .unwrap()
+            .unwrap();
         assert_eq!(path, cfg);
         assert!(!changed);
         let after = std::fs::read_to_string(&cfg).unwrap();

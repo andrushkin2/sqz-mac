@@ -182,7 +182,9 @@ impl<'a> SessionContinuityManager<'a> {
         for event in sorted {
             // Tentatively add the event and check size.
             included.push(event.clone());
-            let candidate = Snapshot { events: included.clone() };
+            let candidate = Snapshot {
+                events: included.clone(),
+            };
             if candidate.size_bytes() > self.max_snapshot_bytes {
                 // Remove the event that pushed us over budget.
                 included.pop();
@@ -201,9 +203,12 @@ impl<'a> SessionContinuityManager<'a> {
         let mut events = Vec::new();
 
         // Last prompt: find the last user turn.
-        if let Some(turn) = session.conversation.iter().rev().find(|t| {
-            matches!(t.role, crate::types::Role::User)
-        }) {
+        if let Some(turn) = session
+            .conversation
+            .iter()
+            .rev()
+            .find(|t| matches!(t.role, crate::types::Role::User))
+        {
             events.push(SnapshotEvent::new(
                 SnapshotEventType::LastPrompt,
                 truncate(&turn.content, 512),
@@ -213,13 +218,13 @@ impl<'a> SessionContinuityManager<'a> {
         // Active files: extract from conversation metadata (file paths mentioned).
         let mut seen_files = std::collections::HashSet::new();
         for record in &session.tool_usage {
-            if record.tool_name.contains("file") || record.tool_name.contains("read") {
-                if seen_files.insert(record.tool_name.clone()) {
-                    events.push(SnapshotEvent::new(
-                        SnapshotEventType::ActiveFile,
-                        record.tool_name.clone(),
-                    ));
-                }
+            if (record.tool_name.contains("file") || record.tool_name.contains("read"))
+                && seen_files.insert(record.tool_name.clone())
+            {
+                events.push(SnapshotEvent::new(
+                    SnapshotEventType::ActiveFile,
+                    record.tool_name.clone(),
+                ));
             }
         }
 
@@ -440,7 +445,10 @@ mod tests {
             SnapshotEvent::new(SnapshotEventType::LastPrompt, "Fix the auth bug".into()),
             SnapshotEvent::new(SnapshotEventType::ActiveFile, "src/auth.rs".into()),
             SnapshotEvent::new(SnapshotEventType::Error, "panic at line 42".into()),
-            SnapshotEvent::new(SnapshotEventType::GitOp, "commit abc123 with a long message".into()),
+            SnapshotEvent::new(
+                SnapshotEventType::GitOp,
+                "commit abc123 with a long message".into(),
+            ),
             SnapshotEvent::new(SnapshotEventType::PendingTask, "Refactor the module".into()),
         ];
 
@@ -523,9 +531,10 @@ mod tests {
         let store = in_memory_store();
         let mgr = SessionContinuityManager::new(&store);
         let snapshot = Snapshot {
-            events: vec![
-                SnapshotEvent::new(SnapshotEventType::LastPrompt, "Fix auth bug".into()),
-            ],
+            events: vec![SnapshotEvent::new(
+                SnapshotEventType::LastPrompt,
+                "Fix auth bug".into(),
+            )],
         };
 
         let guide = mgr.generate_guide(&snapshot);

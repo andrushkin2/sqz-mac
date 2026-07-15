@@ -21,14 +21,17 @@ fn format_git_status(output: &str) -> String {
 
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("new file:") || trimmed.starts_with("modified:") && line.starts_with('\t') {
+        if trimmed.starts_with("new file:")
+            || trimmed.starts_with("modified:") && line.starts_with('\t')
+        {
             staged.push(trimmed.to_string());
         } else if trimmed.starts_with("modified:") || trimmed.starts_with("deleted:") {
             modified.push(trimmed.to_string());
-        } else if line.starts_with("\t") && !trimmed.starts_with("(use") {
-            if output[..output.find(line).unwrap_or(0)].contains("Untracked files:") {
-                untracked.push(trimmed.to_string());
-            }
+        } else if line.starts_with("\t")
+            && !trimmed.starts_with("(use")
+            && output[..output.find(line).unwrap_or(0)].contains("Untracked files:")
+        {
+            untracked.push(trimmed.to_string());
         }
     }
 
@@ -38,7 +41,9 @@ fn format_git_status(output: &str) -> String {
         let mut short_modified = Vec::new();
         let mut short_untracked = Vec::new();
         for line in output.lines() {
-            if line.len() < 3 { continue; }
+            if line.len() < 3 {
+                continue;
+            }
             let (idx, rest) = (line.get(..2), line.get(3..));
             if let (Some(idx), Some(rest)) = (idx, rest) {
                 match idx.trim() {
@@ -68,14 +73,26 @@ fn format_git_status(output: &str) -> String {
         result.push(format!("staged({}): {}", staged.len(), staged.join(", ")));
     }
     if !modified.is_empty() {
-        result.push(format!("modified({}): {}", modified.len(), modified.join(", ")));
+        result.push(format!(
+            "modified({}): {}",
+            modified.len(),
+            modified.join(", ")
+        ));
     }
     if !untracked.is_empty() {
         if untracked.len() > 5 {
-            result.push(format!("untracked({}): {}, ...+{}", untracked.len(),
-                untracked[..3].join(", "), untracked.len() - 3));
+            result.push(format!(
+                "untracked({}): {}, ...+{}",
+                untracked.len(),
+                untracked[..3].join(", "),
+                untracked.len() - 3
+            ));
         } else {
-            result.push(format!("untracked({}): {}", untracked.len(), untracked.join(", ")));
+            result.push(format!(
+                "untracked({}): {}",
+                untracked.len(),
+                untracked.join(", ")
+            ));
         }
     }
     result.join("\n")
@@ -89,11 +106,22 @@ fn format_git_log(output: &str) -> String {
     for line in output.lines() {
         if line.starts_with("commit ") {
             if !current_hash.is_empty() {
-                commits.push(format!("{} {}", &current_hash[..current_hash.len().min(7)], current_subject.trim()));
+                commits.push(format!(
+                    "{} {}",
+                    &current_hash[..current_hash.len().min(7)],
+                    current_subject.trim()
+                ));
             }
-            current_hash = line.strip_prefix("commit ").unwrap_or("").trim().to_string();
+            current_hash = line
+                .strip_prefix("commit ")
+                .unwrap_or("")
+                .trim()
+                .to_string();
             current_subject.clear();
-        } else if line.starts_with("Author:") || line.starts_with("Date:") || line.starts_with("Merge:") {
+        } else if line.starts_with("Author:")
+            || line.starts_with("Date:")
+            || line.starts_with("Merge:")
+        {
             // Skip
         } else {
             let trimmed = line.trim();
@@ -103,7 +131,11 @@ fn format_git_log(output: &str) -> String {
         }
     }
     if !current_hash.is_empty() {
-        commits.push(format!("{} {}", &current_hash[..current_hash.len().min(7)], current_subject.trim()));
+        commits.push(format!(
+            "{} {}",
+            &current_hash[..current_hash.len().min(7)],
+            current_subject.trim()
+        ));
     }
 
     if commits.is_empty() {
@@ -132,18 +164,23 @@ fn format_git_diff(output: &str) -> String {
 
     let mut result = Vec::new();
     if !files.is_empty() {
-        result.push(format!("{} files +{} -{}", files.len(), additions, deletions));
+        result.push(format!(
+            "{} files +{} -{}",
+            files.len(),
+            additions,
+            deletions
+        ));
     }
 
     let mut context_count = 0;
     for line in output.lines() {
-        if line.starts_with("diff --git") || line.starts_with("---") || line.starts_with("+++") {
-            result.push(line.to_string());
-            context_count = 0;
-        } else if line.starts_with("@@") {
-            result.push(line.to_string());
-            context_count = 0;
-        } else if line.starts_with('+') || line.starts_with('-') {
+        if line.starts_with("diff --git")
+            || line.starts_with("---")
+            || line.starts_with("+++")
+            || line.starts_with("@@")
+            || line.starts_with('+')
+            || line.starts_with('-')
+        {
             result.push(line.to_string());
             context_count = 0;
         } else {
@@ -173,10 +210,8 @@ fn format_git_show(output: &str) -> String {
             let trimmed = line.trim();
             // Keep commit, author (first line only), subject
             if line.starts_with("commit ") {
-                header_lines.push(format!("{}", &line[7..line.len().min(14 + 7)]));
-            } else if line.starts_with("Author:") {
-                // skip
-            } else if line.starts_with("Date:") {
+                header_lines.push(line[7..line.len().min(14 + 7)].to_string());
+            } else if line.starts_with("Author:") || line.starts_with("Date:") {
                 // skip
             } else if !trimmed.is_empty() && !trimmed.starts_with("Merge:") {
                 header_lines.push(trimmed.to_string());
@@ -200,7 +235,12 @@ fn format_git_stash(output: &str) -> String {
     // git stash list — compact to count + first few
     if lines.len() > 5 {
         let first_three: Vec<&str> = lines[..3].to_vec();
-        format!("{} stashes:\n{}\n...+{} more", lines.len(), first_three.join("\n"), lines.len() - 3)
+        format!(
+            "{} stashes:\n{}\n...+{} more",
+            lines.len(),
+            first_three.join("\n"),
+            lines.len() - 3
+        )
     } else {
         output.to_string()
     }
@@ -211,19 +251,25 @@ fn format_git_remote(output: &str) -> String {
     let mut seen = std::collections::BTreeMap::new();
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         // "origin  git@github.com:foo/bar.git (fetch)"
         if let Some(name_end) = trimmed.find(|c: char| c.is_whitespace()) {
             let name = &trimmed[..name_end];
             let rest = trimmed[name_end..].trim();
             let url = rest.split_whitespace().next().unwrap_or(rest);
-            seen.entry(name.to_string()).or_insert_with(|| url.to_string());
+            seen.entry(name.to_string())
+                .or_insert_with(|| url.to_string());
         }
     }
     if seen.is_empty() {
         return output.to_string();
     }
-    seen.iter().map(|(name, url)| format!("{}\t{}", name, url)).collect::<Vec<_>>().join("\n")
+    seen.iter()
+        .map(|(name, url)| format!("{}\t{}", name, url))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn format_git_fetch(output: &str) -> String {
@@ -231,15 +277,18 @@ fn format_git_fetch(output: &str) -> String {
         return "ok: up-to-date".to_string();
     }
     // Keep lines with branch updates, skip "remote: Counting objects" noise
-    let meaningful: Vec<&str> = output.lines().filter(|l| {
-        let t = l.trim();
-        !t.starts_with("remote: Counting")
-            && !t.starts_with("remote: Compressing")
-            && !t.starts_with("remote: Total")
-            && !t.starts_with("Receiving objects")
-            && !t.starts_with("Resolving deltas")
-            && !t.is_empty()
-    }).collect();
+    let meaningful: Vec<&str> = output
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("remote: Counting")
+                && !t.starts_with("remote: Compressing")
+                && !t.starts_with("remote: Total")
+                && !t.starts_with("Receiving objects")
+                && !t.starts_with("Resolving deltas")
+                && !t.is_empty()
+        })
+        .collect();
     if meaningful.is_empty() {
         return "ok: up-to-date".to_string();
     }
@@ -249,7 +298,9 @@ fn format_git_fetch(output: &str) -> String {
 fn format_git_short(subcmd: &str, output: &str) -> String {
     match subcmd {
         "add" => {
-            if output.trim().is_empty() { return "ok".to_string(); }
+            if output.trim().is_empty() {
+                return "ok".to_string();
+            }
             output.to_string()
         }
         "commit" => {
@@ -258,8 +309,14 @@ fn format_git_short(subcmd: &str, output: &str) -> String {
                     return format!("ok {}", line.trim());
                 }
             }
-            if output.trim().is_empty() { return "ok".to_string(); }
-            output.lines().find(|l| !l.trim().is_empty()).unwrap_or("ok").to_string()
+            if output.trim().is_empty() {
+                return "ok".to_string();
+            }
+            output
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("ok")
+                .to_string()
         }
         "push" => {
             for line in output.lines() {
@@ -277,9 +334,16 @@ fn format_git_short(subcmd: &str, output: &str) -> String {
                 if line.contains("files changed") || line.contains("file changed") {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     for (i, p) in parts.iter().enumerate() {
-                        if *p == "file" || p.starts_with("file") { files_changed = parts.get(i-1).and_then(|n| n.parse().ok()).unwrap_or(0); }
-                        if p.starts_with("insertion") { insertions = parts.get(i-1).and_then(|n| n.parse().ok()).unwrap_or(0); }
-                        if p.starts_with("deletion") { deletions = parts.get(i-1).and_then(|n| n.parse().ok()).unwrap_or(0); }
+                        if *p == "file" || p.starts_with("file") {
+                            files_changed =
+                                parts.get(i - 1).and_then(|n| n.parse().ok()).unwrap_or(0);
+                        }
+                        if p.starts_with("insertion") {
+                            insertions = parts.get(i - 1).and_then(|n| n.parse().ok()).unwrap_or(0);
+                        }
+                        if p.starts_with("deletion") {
+                            deletions = parts.get(i - 1).and_then(|n| n.parse().ok()).unwrap_or(0);
+                        }
                     }
                 }
             }

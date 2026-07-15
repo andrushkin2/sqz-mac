@@ -69,9 +69,10 @@ pub fn format_test_failures(output: &str) -> String {
         if !summary_line.is_empty() {
             return summary_line;
         }
-        let total = output.lines().filter(|l| {
-            l.contains("... ok") || l.contains("PASSED") || l.contains("passed")
-        }).count();
+        let total = output
+            .lines()
+            .filter(|l| l.contains("... ok") || l.contains("PASSED") || l.contains("passed"))
+            .count();
         if total > 0 {
             return format!("ok: {} tests passed", total);
         }

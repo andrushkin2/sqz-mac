@@ -46,8 +46,8 @@ pub(crate) fn strip_ansi(input: &str) -> String {
                 Some('[') => {
                     // CSI sequence: ESC [ <params> <final byte 0x40-0x7E>
                     chars.next(); // consume '['
-                    // Skip parameter bytes (0x30–0x3F) and intermediate bytes (0x20–0x2F)
-                    // until we hit the final byte (0x40–0x7E) or run out of input.
+                                  // Skip parameter bytes (0x30–0x3F) and intermediate bytes (0x20–0x2F)
+                                  // until we hit the final byte (0x40–0x7E) or run out of input.
                     for c in chars.by_ref() {
                         if ('\x40'..='\x7e').contains(&c) {
                             break;
@@ -165,8 +165,12 @@ mod tests {
 
     #[test]
     fn strips_mixed_sequences_preserves_text() {
-        let input = "\x1b[1m\x1b[33mWARNING:\x1b[0m something happened\n\x1b[2Kerror: bad input\x1b[0m";
-        assert_eq!(strip_ansi(input), "WARNING: something happened\nerror: bad input");
+        let input =
+            "\x1b[1m\x1b[33mWARNING:\x1b[0m something happened\n\x1b[2Kerror: bad input\x1b[0m";
+        assert_eq!(
+            strip_ansi(input),
+            "WARNING: something happened\nerror: bad input"
+        );
     }
 
     #[test]

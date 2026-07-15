@@ -18,7 +18,6 @@
 ///    class — the idea (post-compression preservation check) was prompted
 ///    by caveman-compress's validate.py, but the scan mechanism, inputs,
 ///    and integration point are sqz-specific.
-
 use crate::types::VerifyResult;
 
 /// Confidence threshold below which fallback is triggered.
@@ -56,8 +55,11 @@ impl Verifier {
             .lines()
             .filter(|l| {
                 let lower = l.to_lowercase();
-                lower.contains("error:") || lower.contains("warning:") || lower.contains("fatal:")
-                    || lower.contains("panic:") || lower.contains("exception:")
+                lower.contains("error:")
+                    || lower.contains("warning:")
+                    || lower.contains("fatal:")
+                    || lower.contains("panic:")
+                    || lower.contains("exception:")
             })
             .collect();
         if error_lines.is_empty() {
@@ -73,7 +75,10 @@ impl Verifier {
             } else {
                 failed.push((
                     "error_lines".to_string(),
-                    format!("{} error/warning line(s) missing from output", missing.len()),
+                    format!(
+                        "{} error/warning line(s) missing from output",
+                        missing.len()
+                    ),
                 ));
             }
         }
@@ -95,7 +100,8 @@ impl Verifier {
                 .iter()
                 .filter(|&&line| {
                     // Extract the path-like token and check it's in the output
-                    let token = line.split_whitespace()
+                    let token = line
+                        .split_whitespace()
                         .find(|t| t.contains('/') || t.contains('\\'))
                         .unwrap_or("");
                     !token.is_empty() && !compressed.contains(token)
@@ -137,9 +143,11 @@ impl Verifier {
                             .collect();
                         failed.push((
                             "json_keys".to_string(),
-                            format!("only {:.0}% of JSON keys retained; missing: {:?}",
+                            format!(
+                                "only {:.0}% of JSON keys retained; missing: {:?}",
                                 retention_ratio * 100.0,
-                                &missing[..missing.len().min(5)]),
+                                &missing[..missing.len().min(5)]
+                            ),
                         ));
                     }
                 }
@@ -151,10 +159,7 @@ impl Verifier {
         }
 
         // Check 5: Diff hunk headers preserved (if input is a git diff)
-        let hunk_headers: Vec<&str> = original
-            .lines()
-            .filter(|l| l.starts_with("@@"))
-            .collect();
+        let hunk_headers: Vec<&str> = original.lines().filter(|l| l.starts_with("@@")).collect();
         if hunk_headers.is_empty() {
             passed.push("diff_hunks".to_string());
         } else {
@@ -181,10 +186,7 @@ impl Verifier {
         if numbers.is_empty() {
             passed.push("numeric_values".to_string());
         } else {
-            let missing_nums = numbers
-                .iter()
-                .filter(|&&n| !compressed.contains(n))
-                .count();
+            let missing_nums = numbers.iter().filter(|&&n| !compressed.contains(n)).count();
             if missing_nums == 0 {
                 passed.push("numeric_values".to_string());
             } else {
@@ -229,7 +231,10 @@ impl Verifier {
                     "preservation".to_string(),
                     format!(
                         "only {}/{} preservation tokens retained ({:.0}%); missing: {:?}",
-                        present, total, ratio * 100.0, missing,
+                        present,
+                        total,
+                        ratio * 100.0,
+                        missing,
                     ),
                 ));
             }
@@ -318,10 +323,7 @@ fn extract_preservation_tokens(input: &str) -> Vec<String> {
                 let slice = &scan[i + 1..end];
                 // Must look like an identifier (not prose): contain at least
                 // one non-space char and no spaces unless it's path-like.
-                if !slice.is_empty()
-                    && slice.len() <= 200
-                    && is_identifier_or_path_content(slice)
-                {
+                if !slice.is_empty() && slice.len() <= 200 && is_identifier_or_path_content(slice) {
                     tokens.insert(slice.to_string());
                 }
                 i = end + 1;
@@ -388,7 +390,8 @@ fn extract_preservation_tokens(input: &str) -> Vec<String> {
         }
 
         // Version number: digit.digit(.digit)+, optional 'v' prefix, optional suffix
-        if b.is_ascii_digit() || (b == b'v' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()) {
+        if b.is_ascii_digit() || (b == b'v' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        {
             let end = scan_version_end(bytes, i);
             if end > i {
                 let slice = &scan[i..end];
@@ -410,7 +413,10 @@ fn find_closing(bytes: &[u8], start: usize, target: u8) -> Option<usize> {
     // Look up to 256 bytes forward for the closing char. Anything longer
     // than that is almost certainly not a single token — give up.
     let end = (start + 256).min(bytes.len());
-    bytes[start..end].iter().position(|&b| b == target).map(|off| start + off)
+    bytes[start..end]
+        .iter()
+        .position(|&b| b == target)
+        .map(|off| start + off)
 }
 
 fn is_identifier_or_path_content(s: &str) -> bool {
@@ -423,7 +429,8 @@ fn is_identifier_or_path_content(s: &str) -> bool {
         return false;
     }
     // Must contain at least one "identifier-ish" byte.
-    s.bytes().any(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'/' || b == b':')
+    s.bytes()
+        .any(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'/' || b == b':')
 }
 
 fn is_env_name(s: &str) -> bool {
@@ -435,8 +442,15 @@ fn is_env_name(s: &str) -> bool {
 
 fn is_url_start(bytes: &[u8], i: usize) -> bool {
     const PREFIXES: &[&[u8]] = &[
-        b"https://", b"http://", b"git://", b"ssh://", b"ftp://",
-        b"file://", b"git@", b"ws://", b"wss://",
+        b"https://",
+        b"http://",
+        b"git://",
+        b"ssh://",
+        b"ftp://",
+        b"file://",
+        b"git@",
+        b"ws://",
+        b"wss://",
     ];
     PREFIXES.iter().any(|p| bytes[i..].starts_with(p))
 }
@@ -448,8 +462,14 @@ fn scan_url_end(bytes: &[u8], start: usize) -> usize {
     let mut i = start;
     while i < cap {
         let b = bytes[i];
-        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r'
-            || b == b'"' || b == b'\'' || b == b'<' || b == b'>'
+        if b == b' '
+            || b == b'\t'
+            || b == b'\n'
+            || b == b'\r'
+            || b == b'"'
+            || b == b'\''
+            || b == b'<'
+            || b == b'>'
             || b == b'`'
         {
             break;
@@ -459,8 +479,14 @@ fn scan_url_end(bytes: &[u8], start: usize) -> usize {
     // Trim trailing punctuation that's usually sentence, not URL.
     while i > start {
         let last = bytes[i - 1];
-        if last == b'.' || last == b',' || last == b';' || last == b':'
-            || last == b')' || last == b']' || last == b'!' || last == b'?'
+        if last == b'.'
+            || last == b','
+            || last == b';'
+            || last == b':'
+            || last == b')'
+            || last == b']'
+            || last == b'!'
+            || last == b'?'
         {
             i -= 1;
         } else {
@@ -548,7 +574,11 @@ fn is_version(s: &str) -> bool {
     }
     // Second segment must start with digit (after first '.').
     let after_first: &str = &trimmed[first_segment.len() + 1..];
-    after_first.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+    after_first
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -586,12 +616,21 @@ mod tests {
     #[test]
     fn verify_detects_over_compression() {
         // Use content with multiple checkable markers so more checks fail
-        let original = "error: critical failure at line 42\n@@ -1,5 +1,5 @@\n/path/to/file.rs\nvalue: 12345\n".repeat(20);
+        let original =
+            "error: critical failure at line 42\n@@ -1,5 +1,5 @@\n/path/to/file.rs\nvalue: 12345\n"
+                .repeat(20);
         let compressed = "x"; // almost nothing retained
         let result = Verifier::verify(&original, compressed);
         assert!(!result.passed);
-        assert!(result.checks_failed.iter().any(|(k, _)| k == "min_retention"));
-        assert!(result.fallback_triggered, "should trigger fallback: confidence={:.2}", result.confidence);
+        assert!(result
+            .checks_failed
+            .iter()
+            .any(|(k, _)| k == "min_retention"));
+        assert!(
+            result.fallback_triggered,
+            "should trigger fallback: confidence={:.2}",
+            result.confidence
+        );
     }
 
     #[test]
@@ -607,8 +646,10 @@ mod tests {
         let original = r#"{"id":1,"name":"Alice","status":"active","role":"admin","email":"a@b.com","created":"2024-01-01"}"#;
         let compressed = r#"TOON:{id:1}"#; // only 1 of 6 keys retained (17%)
         let result = Verifier::verify(original, compressed);
-        assert!(result.checks_failed.iter().any(|(k, _)| k == "json_keys"),
-            "should fail json_keys when <50% of keys retained");
+        assert!(
+            result.checks_failed.iter().any(|(k, _)| k == "json_keys"),
+            "should fail json_keys when <50% of keys retained"
+        );
     }
 
     #[test]
@@ -633,7 +674,10 @@ mod tests {
         let original = "error: critical failure\n@@ -1,5 +1,5 @@\n/path/to/file.rs:42\n";
         let compressed = "x"; // almost nothing retained
         let result = Verifier::verify(original, compressed);
-        assert!(result.fallback_triggered, "should trigger fallback on low confidence");
+        assert!(
+            result.fallback_triggered,
+            "should trigger fallback on low confidence"
+        );
     }
 
     // ── Real-world coding session patterns ────────────────────────────────
@@ -644,7 +688,11 @@ mod tests {
         let compressed = "47 tests\ntest result: ok. 47 passed; 0 failed; finished in 2.34s\n";
         let result = Verifier::verify(original, compressed);
         // Should pass — key info retained, no error lines, no JSON
-        assert!(result.confidence >= 0.7, "cargo test output should verify well: {:.2}", result.confidence);
+        assert!(
+            result.confidence >= 0.7,
+            "cargo test output should verify well: {:.2}",
+            result.confidence
+        );
     }
 
     #[test]
@@ -653,8 +701,10 @@ mod tests {
         let compressed = "error[E0308]: mismatched types\n --> src/main.rs:42:5\nerror: aborting due to previous error\n";
         let result = Verifier::verify(original, compressed);
         // Error lines must be retained
-        assert!(result.checks_passed.contains(&"error_lines".to_string()),
-            "error lines should be preserved");
+        assert!(
+            result.checks_passed.contains(&"error_lines".to_string()),
+            "error lines should be preserved"
+        );
     }
 
     #[test]
@@ -662,18 +712,26 @@ mod tests {
         let original = "commit a1b2c3d4\nAuthor: Ojus Chugh <ojuschugh@gmail.com>\nDate:   Sun Apr 12 10:00:00 2026\n\n    feat: Add compression engine\n\ncommit b2c3d4e5\nAuthor: Ojus Chugh <ojuschugh@gmail.com>\nDate:   Sat Apr 11 15:30:00 2026\n\n    fix: Handle edge case\n";
         let compressed = "commit a1b2c3d4\n    feat: Add compression engine\ncommit b2c3d4e5\n    fix: Handle edge case\n";
         let result = Verifier::verify(original, compressed);
-        assert!(result.confidence >= 0.7, "git log should verify well: {:.2}", result.confidence);
+        assert!(
+            result.confidence >= 0.7,
+            "git log should verify well: {:.2}",
+            result.confidence
+        );
     }
 
     #[test]
     fn verify_json_api_with_stripped_nulls() {
         // Simulates what the pipeline does: strip null fields, TOON encode
-        let original = r#"{"id":1,"name":"Alice","debug_info":null,"trace_id":null,"status":"active"}"#;
+        let original =
+            r#"{"id":1,"name":"Alice","debug_info":null,"trace_id":null,"status":"active"}"#;
         let compressed = r#"TOON:{id:1,name:"Alice",status:"active"}"#;
         let result = Verifier::verify(original, compressed);
         // 3 of 5 keys retained (60%) — should pass the 50% threshold
-        assert!(result.checks_passed.contains(&"json_keys".to_string()),
-            "60% key retention should pass: {:?}", result.checks_failed);
+        assert!(
+            result.checks_passed.contains(&"json_keys".to_string()),
+            "60% key retention should pass: {:?}",
+            result.checks_failed
+        );
     }
 
     // ── Preservation-token extractor tests ──────────────────────────────
@@ -681,15 +739,22 @@ mod tests {
     #[test]
     fn extract_detects_absolute_paths() {
         let tokens = extract_preservation_tokens("see /etc/myapp/config.yml for details");
-        assert!(tokens.contains(&"/etc/myapp/config.yml".to_string()),
-            "absolute path should be extracted: {:?}", tokens);
+        assert!(
+            tokens.contains(&"/etc/myapp/config.yml".to_string()),
+            "absolute path should be extracted: {:?}",
+            tokens
+        );
     }
 
     #[test]
     fn extract_detects_relative_paths() {
         let tokens = extract_preservation_tokens("edit src/main.rs and tests/util.rs");
         assert!(tokens.contains(&"src/main.rs".to_string()), "{:?}", tokens);
-        assert!(tokens.contains(&"tests/util.rs".to_string()), "{:?}", tokens);
+        assert!(
+            tokens.contains(&"tests/util.rs".to_string()),
+            "{:?}",
+            tokens
+        );
     }
 
     #[test]
@@ -699,10 +764,16 @@ mod tests {
                      drwxr-xr-x  user staff   96 Apr 18 configuration/\n";
         let tokens = extract_preservation_tokens(input);
         // These should appear as path-like tokens (they have `/`)
-        assert!(tokens.iter().any(|t| t.contains("packages")),
-            "should extract packages: {:?}", tokens);
-        assert!(tokens.iter().any(|t| t.contains("configuration")),
-            "should extract configuration: {:?}", tokens);
+        assert!(
+            tokens.iter().any(|t| t.contains("packages")),
+            "should extract packages: {:?}",
+            tokens
+        );
+        assert!(
+            tokens.iter().any(|t| t.contains("configuration")),
+            "should extract configuration: {:?}",
+            tokens
+        );
     }
 
     #[test]
@@ -710,19 +781,34 @@ mod tests {
         let input = "clone from https://github.com/example/repository and \
                      read https://docs.example.com/guide.";
         let tokens = extract_preservation_tokens(input);
-        assert!(tokens.contains(&"https://github.com/example/repository".to_string()),
-            "{:?}", tokens);
-        assert!(tokens.iter().any(|t| t.starts_with("https://docs.example.com")),
-            "{:?}", tokens);
+        assert!(
+            tokens.contains(&"https://github.com/example/repository".to_string()),
+            "{:?}",
+            tokens
+        );
+        assert!(
+            tokens
+                .iter()
+                .any(|t| t.starts_with("https://docs.example.com")),
+            "{:?}",
+            tokens
+        );
     }
 
     #[test]
     fn extract_detects_backtick_identifiers() {
-        let tokens = extract_preservation_tokens(
-            "use `SqzEngine::new` and `CompressionPipeline::compress`"
+        let tokens =
+            extract_preservation_tokens("use `SqzEngine::new` and `CompressionPipeline::compress`");
+        assert!(
+            tokens.contains(&"SqzEngine::new".to_string()),
+            "{:?}",
+            tokens
         );
-        assert!(tokens.contains(&"SqzEngine::new".to_string()), "{:?}", tokens);
-        assert!(tokens.contains(&"CompressionPipeline::compress".to_string()), "{:?}", tokens);
+        assert!(
+            tokens.contains(&"CompressionPipeline::compress".to_string()),
+            "{:?}",
+            tokens
+        );
     }
 
     #[test]
@@ -735,28 +821,42 @@ mod tests {
 
     #[test]
     fn extract_detects_version_numbers() {
-        let tokens = extract_preservation_tokens(
-            "upgrade to 1.2.3 from v0.7.0 and pin 2.0.0-beta.1"
+        let tokens =
+            extract_preservation_tokens("upgrade to 1.2.3 from v0.7.0 and pin 2.0.0-beta.1");
+        assert!(
+            tokens.iter().any(|t| t.starts_with("1.2.3")),
+            "{:?}",
+            tokens
         );
-        assert!(tokens.iter().any(|t| t.starts_with("1.2.3")), "{:?}", tokens);
-        assert!(tokens.iter().any(|t| t.starts_with("v0.7.0")), "{:?}", tokens);
+        assert!(
+            tokens.iter().any(|t| t.starts_with("v0.7.0")),
+            "{:?}",
+            tokens
+        );
     }
 
     #[test]
     fn extract_ignores_prose() {
         // Plain prose without paths/URLs/identifiers should produce no tokens
         let tokens = extract_preservation_tokens(
-            "The quick brown fox jumps over the lazy dog. Lorem ipsum dolor sit amet."
+            "The quick brown fox jumps over the lazy dog. Lorem ipsum dolor sit amet.",
         );
-        assert!(tokens.is_empty(), "prose should yield no preservation tokens: {:?}", tokens);
+        assert!(
+            tokens.is_empty(),
+            "prose should yield no preservation tokens: {:?}",
+            tokens
+        );
     }
 
     #[test]
     fn extract_ignores_fractions_in_prose() {
         // "3/4 of the way" is not a path
         let tokens = extract_preservation_tokens("We completed 3/4 of the tasks");
-        assert!(tokens.iter().all(|t| !t.contains("3/4")),
-            "fraction should not be extracted as path: {:?}", tokens);
+        assert!(
+            tokens.iter().all(|t| !t.contains("3/4")),
+            "fraction should not be extracted as path: {:?}",
+            tokens
+        );
     }
 
     #[test]
@@ -767,7 +867,11 @@ mod tests {
             input.push_str(&format!("file_{}/sub_{}.txt ", i, i));
         }
         let tokens = extract_preservation_tokens(&input);
-        assert!(tokens.len() <= MAX_TOKENS, "should cap at {MAX_TOKENS}, got {}", tokens.len());
+        assert!(
+            tokens.len() <= MAX_TOKENS,
+            "should cap at {MAX_TOKENS}, got {}",
+            tokens.len()
+        );
     }
 
     // ── Preservation check integration tests (regression for session bugs) ─
@@ -781,8 +885,12 @@ mod tests {
                           drwxr-xr-x  user staff  128 Apr 18 docs/\n";
         let result = Verifier::verify(original, compressed);
         assert!(
-            result.checks_failed.iter().any(|(k, _)| k == "preservation"),
-            "should fail preservation when packages→pkgs: {:?}", result.checks_failed
+            result
+                .checks_failed
+                .iter()
+                .any(|(k, _)| k == "preservation"),
+            "should fail preservation when packages→pkgs: {:?}",
+            result.checks_failed
         );
     }
 
@@ -793,8 +901,12 @@ mod tests {
         let compressed = "check /etc/myapp/config/default.yml for errors";
         let result = Verifier::verify(original, compressed);
         assert!(
-            result.checks_failed.iter().any(|(k, _)| k == "preservation"),
-            "should fail preservation when path segment rewritten: {:?}", result.checks_failed
+            result
+                .checks_failed
+                .iter()
+                .any(|(k, _)| k == "preservation"),
+            "should fail preservation when path segment rewritten: {:?}",
+            result.checks_failed
         );
     }
 
@@ -805,8 +917,12 @@ mod tests {
         let compressed = "origin  https://github.com/example/repo (fetch)";
         let result = Verifier::verify(original, compressed);
         assert!(
-            result.checks_failed.iter().any(|(k, _)| k == "preservation"),
-            "should fail preservation when URL path rewritten: {:?}", result.checks_failed
+            result
+                .checks_failed
+                .iter()
+                .any(|(k, _)| k == "preservation"),
+            "should fail preservation when URL path rewritten: {:?}",
+            result.checks_failed
         );
     }
 
@@ -820,8 +936,12 @@ mod tests {
         let compressed = "drwxr-xr-x ... [×4, varying: 4 unique values]\n";
         let result = Verifier::verify(original, compressed);
         assert!(
-            result.checks_failed.iter().any(|(k, _)| k == "preservation"),
-            "should fail preservation when filenames dropped: {:?}", result.checks_failed
+            result
+                .checks_failed
+                .iter()
+                .any(|(k, _)| k == "preservation"),
+            "should fail preservation when filenames dropped: {:?}",
+            result.checks_failed
         );
     }
 
@@ -833,7 +953,8 @@ mod tests {
         let result = Verifier::verify(original, compressed);
         assert!(
             result.checks_passed.contains(&"preservation".to_string()),
-            "identical content must pass preservation: {:?}", result.checks_failed
+            "identical content must pass preservation: {:?}",
+            result.checks_failed
         );
     }
 
@@ -845,7 +966,8 @@ mod tests {
         let result = Verifier::verify(original, compressed);
         assert!(
             result.checks_passed.contains(&"preservation".to_string()),
-            "null-stripping must not trip preservation: {:?}", result.checks_failed
+            "null-stripping must not trip preservation: {:?}",
+            result.checks_failed
         );
     }
 
@@ -868,7 +990,10 @@ mod tests {
                           file: src/main.rs line 42\n";
         let result = Verifier::verify(original, compressed);
         assert!(
-            result.checks_failed.iter().any(|(k, _)| k == "preservation"),
+            result
+                .checks_failed
+                .iter()
+                .any(|(k, _)| k == "preservation"),
             "preservation should fail"
         );
         assert!(

@@ -45,9 +45,9 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqz_engine::{SqzEngine, ToolDefinition, ToolSelector};
 use sqz_engine::error::{Result, SqzError};
 use sqz_engine::preset::{Preset, PresetParser};
+use sqz_engine::{SqzEngine, ToolDefinition, ToolSelector};
 
 // ── Public data types ─────────────────────────────────────────────────────────
 
@@ -120,7 +120,10 @@ impl JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
             result: None,
-            error: Some(JsonRpcError { code, message: message.into() }),
+            error: Some(JsonRpcError {
+                code,
+                message: message.into(),
+            }),
         }
     }
 }
@@ -146,6 +149,10 @@ pub struct McpServer {
     engine: SqzEngine,
     shared: Arc<SharedState>,
     preset_dir: PathBuf,
+    /// Root directory the `sqz_*` file tools are confined to (plus
+    /// `$HOME/.sqz`). Defaults to the process CWD at construction time —
+    /// see [`resolve_guarded_path`].
+    workspace_root: PathBuf,
 }
 
 impl McpServer {
@@ -163,14 +170,53 @@ impl McpServer {
     #[cfg(test)]
     fn new_with_store(preset_dir: &Path, store_path: &Path) -> Result<Self> {
         let engine = SqzEngine::with_preset_and_store(Preset::default(), store_path)?;
-        Self::with_engine(preset_dir, engine)
+        let mut server = Self::with_engine(preset_dir, engine)?;
+        // Tests read/write fixture files under `preset_dir`'s tempdir, which
+        // is unrelated to the test-runner process's CWD. Scope the file-tool
+        // allowlist to that tempdir so the guard in `resolve_guarded_path`
+        // can be exercised without weakening it for production use.
+        server.workspace_root = preset_dir
+            .canonicalize()
+            .unwrap_or_else(|_| preset_dir.to_owned());
+        Ok(server)
     }
 
     /// Shared construction logic. Both `new` and the test helper land
     /// here so the wiring of `ToolSelector`, `SharedState`, and
     /// `preset_dir` stays in one place.
-    fn with_engine(preset_dir: &Path, engine: SqzEngine) -> Result<Self> {
-        let preset = Preset::default();
+    fn with_engine(preset_dir: &Path, mut engine: SqzEngine) -> Result<Self> {
+        // Load any preset already sitting in `preset_dir` so it's active
+        // from the very first request. Earlier versions only picked up
+        // presets written *after* startup (via the hot-reload watcher);
+        // a preset dropped in before `sqz-mcp` was launched was silently
+        // ignored despite the module doc claiming presets are "loaded
+        // from a directory you specify at startup".
+        let mut preset = Preset::default();
+        if let Some((path, toml_str)) = find_startup_preset(preset_dir) {
+            match PresetParser::parse(&toml_str) {
+                Ok(parsed) => match engine.reload_preset(&toml_str) {
+                    Ok(()) => {
+                        preset = parsed;
+                        eprintln!("[sqz-mcp] loaded preset from {}", path.display());
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[sqz-mcp] warning: found preset at {} but failed to apply it \
+                             ({e}); using the default preset instead",
+                            path.display()
+                        );
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "[sqz-mcp] warning: invalid preset TOML at {} ({e}); \
+                         using the default preset instead",
+                        path.display()
+                    );
+                }
+            }
+        }
+
         let model_path = Path::new("");
         let mut tool_selector = ToolSelector::new(model_path, &preset)?;
 
@@ -184,17 +230,25 @@ impl McpServer {
             registered_tools: Mutex::new(default_tools),
         });
 
+        let workspace_root = std::env::current_dir()
+            .and_then(|d| d.canonicalize())
+            .unwrap_or_else(|_| PathBuf::from("."));
+
         Ok(McpServer {
             engine,
             shared,
             preset_dir: preset_dir.to_owned(),
+            workspace_root,
         })
     }
 
     /// Apply any pending preset reload before processing a request.
     fn apply_pending_preset(&mut self) {
         let pending = {
-            let mut guard = self.shared.pending_preset.lock()
+            let mut guard = self
+                .shared
+                .pending_preset
+                .lock()
                 .unwrap_or_else(|e| e.into_inner());
             guard.take()
         };
@@ -402,10 +456,90 @@ impl McpServer {
         use sqz_engine::CacheResult;
         let result = self.engine.compress_with_cache(text)?;
         Ok(match result {
-            CacheResult::Dedup { inline_ref, token_cost } => (inline_ref, token_cost),
-            CacheResult::Delta { delta_text, token_cost, .. } => (delta_text, token_cost),
+            CacheResult::Dedup {
+                inline_ref,
+                token_cost,
+            } => (inline_ref, token_cost),
+            CacheResult::Delta {
+                delta_text,
+                token_cost,
+                ..
+            } => (delta_text, token_cost),
             CacheResult::Fresh { output } => (output.data, output.tokens_compressed),
         })
+    }
+
+    /// Directories the `sqz_*` file tools are allowed to touch: this
+    /// server's `workspace_root` (the CWD at construction time, or the
+    /// scoped test root — see [`McpServer::new_with_store`]) and
+    /// `$HOME/.sqz` (sqz's own presets/cache/session data). Anything that
+    /// canonicalizes outside these roots is refused.
+    ///
+    /// This is an actual enforcement boundary, not documentation-only:
+    /// earlier versions had a doc comment describing this guard without
+    /// any code backing it, which let `sqz_read_file` read arbitrary files
+    /// such as `/etc/hosts`.
+    fn allowed_roots(&self) -> Vec<PathBuf> {
+        let mut roots = vec![self.workspace_root.clone()];
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            let sqz_home = home.join(".sqz");
+            if let Ok(canon) = sqz_home.canonicalize() {
+                roots.push(canon);
+            }
+        }
+        roots
+    }
+
+    /// Resolve `path_str` (relative or absolute) against CWD, canonicalize
+    /// it, and verify the result stays within [`McpServer::allowed_roots`].
+    /// Rejects paths that escape the allowlist via `..`, symlinks, or
+    /// absolute traversal.
+    ///
+    /// For paths that don't exist yet (rare for these read-only tools, but
+    /// possible for `sqz_grep`/`sqz_list_dir` on a not-yet-created dir),
+    /// the parent directory is canonicalized instead and the leaf name
+    /// re-appended, so the check still holds without requiring the target
+    /// to pre-exist.
+    fn resolve_guarded_path(&self, path_str: &str) -> Result<PathBuf> {
+        let raw = PathBuf::from(path_str);
+        let cwd = std::env::current_dir()
+            .map_err(|e| SqzError::Other(format!("could not resolve CWD: {e}")))?;
+        let candidate = if raw.is_absolute() {
+            raw
+        } else {
+            cwd.join(&raw)
+        };
+
+        let canonical = if candidate.exists() {
+            candidate.canonicalize().map_err(|e| {
+                SqzError::Other(format!(
+                    "could not resolve path '{}': {e}",
+                    candidate.display()
+                ))
+            })?
+        } else {
+            let parent = candidate.parent().unwrap_or_else(|| Path::new("/"));
+            let canon_parent = parent.canonicalize().map_err(|e| {
+                SqzError::Other(format!(
+                    "could not resolve path '{}': {e}",
+                    candidate.display()
+                ))
+            })?;
+            match candidate.file_name() {
+                Some(name) => canon_parent.join(name),
+                None => canon_parent,
+            }
+        };
+
+        let roots = self.allowed_roots();
+        if roots.iter().any(|root| canonical.starts_with(root)) {
+            Ok(canonical)
+        } else {
+            Err(SqzError::Other(format!(
+                "path '{}' is outside the allowed workspace root(s); refusing access",
+                canonical.display()
+            )))
+        }
     }
 
     /// Read a file from disk and return the content compressed.
@@ -425,11 +559,13 @@ impl McpServer {
     ///   * Relative paths resolve against CWD (the directory where
     ///     sqz-mcp was launched, which for MCP-over-stdio is typically
     ///     the user's project root).
-    ///   * Absolute paths work but are rejected if they escape the
-    ///     server's home directory OR the user's HOME via `..`.
-    ///     This is a deliberately narrow guard — path-traversal
-    ///     protection for MCP is the host's job, not ours, but a
-    ///     basic sanity check keeps accidents cheap.
+    ///   * Absolute paths work but are canonicalized and checked
+    ///     against an allowlist (CWD and `$HOME/.sqz`) via
+    ///     [`resolve_guarded_path`]. Anything that resolves outside
+    ///     those roots — including via `..` traversal or symlinks — is
+    ///     rejected with an error. This is an enforced boundary, not
+    ///     just a comment: the agent cannot use this tool to read
+    ///     arbitrary files on the host (e.g. `/etc/hosts`).
     ///   * Missing files return a clear error rather than an empty
     ///     string, so the agent can distinguish "file is empty" from
     ///     "file doesn't exist".
@@ -447,9 +583,7 @@ impl McpServer {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                SqzError::Other(
-                    "sqz_read_file: input must be { \"path\": \"<file>\" }".to_string(),
-                )
+                SqzError::Other("sqz_read_file: input must be { \"path\": \"<file>\" }".to_string())
             })?;
 
         // Cap default at 4 MB — reading huge files through MCP is
@@ -461,7 +595,9 @@ impl McpServer {
             .and_then(|v| v.as_u64())
             .unwrap_or(4 * 1024 * 1024) as usize;
 
-        let path = std::path::PathBuf::from(path_str);
+        let path = self
+            .resolve_guarded_path(path_str)
+            .map_err(|e| SqzError::Other(format!("sqz_read_file: {e}")))?;
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => {
@@ -542,7 +678,9 @@ impl McpServer {
             .and_then(|v| v.as_u64())
             .unwrap_or(1) as usize;
 
-        let root = std::path::PathBuf::from(path_str);
+        let root = self
+            .resolve_guarded_path(path_str)
+            .map_err(|e| SqzError::Other(format!("sqz_list_dir: {e}")))?;
         let mut lines = Vec::new();
         list_dir_recursive(&root, &root, 0, max_depth, &mut lines)?;
 
@@ -612,18 +750,16 @@ impl McpServer {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let root = std::path::PathBuf::from(path_str);
+        let root = self
+            .resolve_guarded_path(path_str)
+            .map_err(|e| SqzError::Other(format!("sqz_grep: {e}")))?;
 
         // Compile regex once if needed; fall back to substring search
         // when disabled or when the pattern fails to compile.
         let regex = if use_regex {
             match regex::Regex::new(pattern) {
                 Ok(r) => Some(r),
-                Err(e) => {
-                    return Err(SqzError::Other(format!(
-                        "sqz_grep: invalid regex: {e}"
-                    )))
-                }
+                Err(e) => return Err(SqzError::Other(format!("sqz_grep: invalid regex: {e}"))),
             }
         } else {
             None
@@ -655,12 +791,18 @@ impl McpServer {
 
     /// List tools, optionally filtered by intent using the `ToolSelector`.
     pub fn list_tools(&self, intent: Option<&str>) -> Result<Vec<ToolDefinition>> {
-        let tools = self.shared.registered_tools.lock()
+        let tools = self
+            .shared
+            .registered_tools
+            .lock()
             .unwrap_or_else(|e| e.into_inner());
 
         match intent {
             Some(intent_str) if !intent_str.is_empty() => {
-                let selector = self.shared.tool_selector.lock()
+                let selector = self
+                    .shared
+                    .tool_selector
+                    .lock()
                     .unwrap_or_else(|e| e.into_inner());
                 let selected_ids = selector.select(intent_str, 5)?;
                 let filtered: Vec<ToolDefinition> = tools
@@ -714,11 +856,17 @@ impl McpServer {
                                     if let Ok(mut pending) = shared.pending_preset.lock() {
                                         *pending = Some(toml_str);
                                     }
-                                    eprintln!("[sqz-mcp] preset change detected: {}", path.display());
+                                    eprintln!(
+                                        "[sqz-mcp] preset change detected: {}",
+                                        path.display()
+                                    );
                                 }
                                 Err(e) => {
                                     // Invalid TOML: log error, keep previous valid preset.
-                                    eprintln!("[sqz-mcp] invalid preset TOML in {}: {e}", path.display());
+                                    eprintln!(
+                                        "[sqz-mcp] invalid preset TOML in {}: {e}",
+                                        path.display()
+                                    );
                                 }
                             }
                         }
@@ -752,8 +900,10 @@ impl McpServer {
             let Some(response) = self.handle_jsonrpc_line(&line) else {
                 continue;
             };
-            let serialized = serde_json::to_string(&response)
-                .unwrap_or_else(|_| r#"{"jsonrpc":"2.0","error":{"code":-32700,"message":"serialize error"}}"#.to_string());
+            let serialized = serde_json::to_string(&response).unwrap_or_else(|_| {
+                r#"{"jsonrpc":"2.0","error":{"code":-32700,"message":"serialize error"}}"#
+                    .to_string()
+            });
             writeln!(out, "{serialized}")
                 .map_err(|e| SqzError::Other(format!("stdout write error: {e}")))?;
             out.flush()
@@ -763,8 +913,8 @@ impl McpServer {
     }
 
     fn run_sse(mut self, port: u16) -> Result<()> {
-        use std::net::TcpListener;
         use std::io::BufReader;
+        use std::net::TcpListener;
 
         let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .map_err(|e| SqzError::Other(format!("SSE bind error on port {port}: {e}")))?;
@@ -773,8 +923,11 @@ impl McpServer {
         for stream in listener.incoming() {
             match stream {
                 Ok(mut stream) => {
-                    let mut reader = BufReader::new(stream.try_clone()
-                        .map_err(|e| SqzError::Other(format!("stream clone error: {e}")))?);
+                    let mut reader = BufReader::new(
+                        stream
+                            .try_clone()
+                            .map_err(|e| SqzError::Other(format!("stream clone error: {e}")))?,
+                    );
                     let mut request_line = String::new();
                     let _ = reader.read_line(&mut request_line);
 
@@ -828,19 +981,24 @@ impl McpServer {
 
         let req: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
-            Err(e) => return Some(JsonRpcResponse::err(None, -32700, format!("parse error: {e}"))),
+            Err(e) => {
+                return Some(JsonRpcResponse::err(
+                    None,
+                    -32700,
+                    format!("parse error: {e}"),
+                ))
+            }
         };
 
         // Notifications (no id) are one-way per JSON-RPC 2.0 and MUST NOT
         // receive a response. Responding to one makes strict clients like
         // Claude Code mark the server as failed. Reported in issue #12.
-        if req.id.is_none() {
-            return None;
-        }
+        req.id.as_ref()?;
 
         Some(match req.method.as_str() {
             "tools/list" => {
-                let intent = req.params
+                let intent = req
+                    .params
                     .as_ref()
                     .and_then(|p| p.get("intent"))
                     .and_then(|v| v.as_str())
@@ -848,33 +1006,36 @@ impl McpServer {
 
                 match self.list_tools(intent.as_deref()) {
                     Ok(tools) => {
-                        let tool_list: Vec<Value> = tools.iter().map(|t| {
-                            // `outputSchema` is optional per the MCP spec
-                            // (2025-06-18). When present, its root `type`
-                            // MUST be `"object"` — not `"string"` or any
-                            // other scalar. OpenCode (and other strict
-                            // clients) validate this and will disable the
-                            // whole server on a violation (reported in
-                            // issue #5). We therefore omit the field
-                            // entirely when it's unset (null) and only
-                            // propagate it when a caller has supplied a
-                            // proper object-shaped schema.
-                            let mut tool_json = serde_json::json!({
-                                "name": t.id,
-                                "description": t.description,
-                                "inputSchema": t.input_schema,
-                                "sqz:transforms": t.compression_transforms,
-                            });
-                            if !t.output_schema.is_null() {
-                                if let Some(obj) = tool_json.as_object_mut() {
-                                    obj.insert(
-                                        "outputSchema".to_string(),
-                                        t.output_schema.clone(),
-                                    );
+                        let tool_list: Vec<Value> = tools
+                            .iter()
+                            .map(|t| {
+                                // `outputSchema` is optional per the MCP spec
+                                // (2025-06-18). When present, its root `type`
+                                // MUST be `"object"` — not `"string"` or any
+                                // other scalar. OpenCode (and other strict
+                                // clients) validate this and will disable the
+                                // whole server on a violation (reported in
+                                // issue #5). We therefore omit the field
+                                // entirely when it's unset (null) and only
+                                // propagate it when a caller has supplied a
+                                // proper object-shaped schema.
+                                let mut tool_json = serde_json::json!({
+                                    "name": t.id,
+                                    "description": t.description,
+                                    "inputSchema": t.input_schema,
+                                    "sqz:transforms": t.compression_transforms,
+                                });
+                                if !t.output_schema.is_null() {
+                                    if let Some(obj) = tool_json.as_object_mut() {
+                                        obj.insert(
+                                            "outputSchema".to_string(),
+                                            t.output_schema.clone(),
+                                        );
+                                    }
                                 }
-                            }
-                            tool_json
-                        }).collect();
+                                tool_json
+                            })
+                            .collect();
                         JsonRpcResponse::ok(req.id, serde_json::json!({ "tools": tool_list }))
                     }
                     Err(e) => JsonRpcResponse::err(req.id, -32603, e.to_string()),
@@ -888,18 +1049,30 @@ impl McpServer {
                 };
                 let tool_id = match params.get("name").and_then(|v| v.as_str()) {
                     Some(id) => id.to_string(),
-                    None => return Some(JsonRpcResponse::err(req.id, -32602, "missing params.name")),
+                    None => {
+                        return Some(JsonRpcResponse::err(req.id, -32602, "missing params.name"))
+                    }
                 };
                 let input = params.get("arguments").cloned().unwrap_or(Value::Null);
-                let intent = params.get("intent").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let intent = params
+                    .get("intent")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
-                let call_req = ToolCallRequest { tool_id, input, intent };
+                let call_req = ToolCallRequest {
+                    tool_id,
+                    input,
+                    intent,
+                };
                 match self.handle_tool_call(call_req) {
-                    Ok(resp) => JsonRpcResponse::ok(req.id, serde_json::json!({
-                        "content": [{ "type": "text", "text": resp.output }],
-                        "tokens_original": resp.tokens_original,
-                        "tokens_compressed": resp.tokens_compressed,
-                    })),
+                    Ok(resp) => JsonRpcResponse::ok(
+                        req.id,
+                        serde_json::json!({
+                            "content": [{ "type": "text", "text": resp.output }],
+                            "tokens_original": resp.tokens_original,
+                            "tokens_compressed": resp.tokens_compressed,
+                        }),
+                    ),
                     Err(e) => JsonRpcResponse::err(req.id, -32603, e.to_string()),
                 }
             }
@@ -915,13 +1088,16 @@ impl McpServer {
                 // startup via default_tool_definitions() and never emits
                 // notifications/tools/list_changed). This matches the MCP
                 // 2024-11-05 spec: https://mcpcn.com/en/specification/2024-11-05/server/tools/
-                JsonRpcResponse::ok(req.id, serde_json::json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": { "listChanged": false }
-                    },
-                    "serverInfo": { "name": "sqz-mcp", "version": env!("CARGO_PKG_VERSION") }
-                }))
+                JsonRpcResponse::ok(
+                    req.id,
+                    serde_json::json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "tools": { "listChanged": false }
+                        },
+                        "serverInfo": { "name": "sqz-mcp", "version": env!("CARGO_PKG_VERSION") }
+                    }),
+                )
             }
 
             _ => JsonRpcResponse::err(req.id, -32601, format!("method not found: {}", req.method)),
@@ -1199,6 +1375,29 @@ pub fn default_tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+// ── Startup preset discovery ─────────────────────────────────────────────────
+
+/// Find the preset TOML to load at startup from `preset_dir`, if any.
+///
+/// Picks the alphabetically-first `*.toml` file in the directory (a
+/// directory with a single `default.toml` — the common case — behaves
+/// exactly as expected; a directory with multiple presets picks a
+/// deterministic one rather than an arbitrary filesystem-order one).
+/// Returns `None` if the directory doesn't exist or has no TOML files —
+/// that's not an error, since a fresh install has no presets yet.
+fn find_startup_preset(preset_dir: &Path) -> Option<(PathBuf, String)> {
+    let entries = std::fs::read_dir(preset_dir).ok()?;
+    let mut tomls: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+        .collect();
+    tomls.sort();
+    let path = tomls.into_iter().next()?;
+    let toml_str = std::fs::read_to_string(&path).ok()?;
+    Some((path, toml_str))
+}
+
 // ── Token estimation helper ───────────────────────────────────────────────────
 
 /// Rough token estimate: ~4 characters per token (GPT-style approximation).
@@ -1239,9 +1438,7 @@ fn list_dir_recursive(
         }
     };
 
-    let mut sorted: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     // Deterministic ordering so outputs dedup across runs (important for
     // sqz's SHA-256 cache — same listing twice should return a §ref§).
     sorted.sort_by_key(|e| e.file_name());
@@ -1256,8 +1453,14 @@ fn list_dir_recursive(
         }
         if matches!(
             name_str.as_ref(),
-            "node_modules" | "target" | "dist" | "build" | "__pycache__"
-                | "vendor" | ".next" | ".nuxt"
+            "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "__pycache__"
+                | "vendor"
+                | ".next"
+                | ".nuxt"
         ) {
             continue;
         }
@@ -1338,8 +1541,14 @@ fn grep_walk(
         }
         if matches!(
             name_str.as_ref(),
-            "node_modules" | "target" | "dist" | "build" | "__pycache__"
-                | "vendor" | ".next" | ".nuxt"
+            "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "__pycache__"
+                | "vendor"
+                | ".next"
+                | ".nuxt"
         ) {
             continue;
         }
@@ -1429,8 +1638,8 @@ mod tests {
         // Otherwise test N+1's sqz_list_dir output for a tiny dir
         // gets returned as a §ref:HASH§ token from test N's cache.
         let store_path = dir.path().join("sessions.db");
-        let server = McpServer::new_with_store(dir.path(), &store_path)
-            .expect("McpServer::new_with_store");
+        let server =
+            McpServer::new_with_store(dir.path(), &store_path).expect("McpServer::new_with_store");
         (server, dir)
     }
 
@@ -1515,7 +1724,9 @@ mod tests {
             "filtered list must not exceed registered count ({registered})"
         );
 
-        let tools = server.list_tools(Some("")).expect("empty intent = all tools");
+        let tools = server
+            .list_tools(Some(""))
+            .expect("empty intent = all tools");
         assert_eq!(
             tools.len(),
             registered,
@@ -1595,10 +1806,16 @@ complexity_threshold = 0.4
         }
 
         // The pending preset should have been stored within 2 seconds.
-        let has_pending = server.shared.pending_preset.lock()
+        let has_pending = server
+            .shared
+            .pending_preset
+            .lock()
             .map(|g| g.is_some())
             .unwrap_or(false);
-        assert!(has_pending, "preset should have been hot-reloaded within 2 seconds");
+        assert!(
+            has_pending,
+            "preset should have been hot-reloaded within 2 seconds"
+        );
     }
 
     /// Test that invalid TOML does not crash the server (keeps previous preset).
@@ -1617,14 +1834,116 @@ complexity_threshold = 0.4
         std::thread::sleep(Duration::from_millis(200));
 
         // No pending preset should be stored (invalid TOML was rejected).
-        let has_pending = server.shared.pending_preset.lock()
+        let has_pending = server
+            .shared
+            .pending_preset
+            .lock()
             .map(|g| g.is_some())
             .unwrap_or(false);
-        assert!(!has_pending, "invalid TOML should not be stored as pending preset");
+        assert!(
+            !has_pending,
+            "invalid TOML should not be stored as pending preset"
+        );
 
         // Server should still work.
-        let tools = server.list_tools(None).expect("list_tools after bad preset");
-        assert!(!tools.is_empty(), "tools should still be available after invalid preset");
+        let tools = server
+            .list_tools(None)
+            .expect("list_tools after bad preset");
+        assert!(
+            !tools.is_empty(),
+            "tools should still be available after invalid preset"
+        );
+    }
+
+    #[test]
+    fn test_mcp_server_loads_existing_preset_at_startup_without_error() {
+        // Regression test: a preset TOML already sitting in `preset_dir`
+        // *before* the server starts must be loaded immediately — the
+        // module doc promises "the server loads presets from a directory
+        // you specify at startup". Earlier versions only picked up
+        // presets written *after* startup via the hot-reload watcher;
+        // anything already present was silently ignored in favor of
+        // `Preset::default()`. This exercises the load path end to end
+        // (parse + `engine.reload_preset` + tool-selector rebuild); see
+        // `find_startup_preset_*` below for direct coverage of the
+        // discovery logic itself.
+        let dir = TempDir::new().expect("tempdir");
+        let toml_content = r#"
+[preset]
+name = "startup-test"
+version = "1.0"
+
+[compression]
+stages = []
+
+[tool_selection]
+max_tools = 5
+similarity_threshold = 0.3
+
+[budget]
+warning_threshold = 0.70
+ceiling_threshold = 0.85
+default_window_size = 200000
+
+[terse_mode]
+enabled = false
+level = "moderate"
+
+[model]
+family = "anthropic"
+primary = "claude-sonnet-4-20250514"
+complexity_threshold = 0.4
+"#;
+        std::fs::write(dir.path().join("default.toml"), toml_content).expect("write preset");
+
+        let store_path = dir.path().join("sessions.db");
+        let mut server = McpServer::new_with_store(dir.path(), &store_path)
+            .expect("McpServer::new_with_store should apply the startup preset, not error");
+
+        // Server must still be fully functional after loading the custom
+        // startup preset.
+        let req = ToolCallRequest {
+            tool_id: "compress".to_string(),
+            input: serde_json::json!({ "text": "hello from startup preset" }),
+            intent: None,
+        };
+        server
+            .handle_tool_call(req)
+            .expect("compress should succeed with the startup preset active");
+    }
+
+    #[test]
+    fn test_find_startup_preset_picks_alphabetically_first_toml() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("zzz.toml"), "z").expect("write");
+        std::fs::write(dir.path().join("aaa.toml"), "a").expect("write");
+        std::fs::write(dir.path().join("readme.md"), "not toml").expect("write");
+
+        let (path, content) = find_startup_preset(dir.path()).expect("should find a preset");
+        assert_eq!(path.file_name().unwrap(), "aaa.toml");
+        assert_eq!(content, "a");
+    }
+
+    #[test]
+    fn test_find_startup_preset_returns_none_for_empty_or_missing_dir() {
+        let dir = TempDir::new().expect("tempdir");
+        assert!(
+            find_startup_preset(dir.path()).is_none(),
+            "empty preset dir should yield no startup preset"
+        );
+
+        let missing = dir.path().join("does-not-exist");
+        assert!(
+            find_startup_preset(&missing).is_none(),
+            "missing preset dir should yield no startup preset, not an error"
+        );
+    }
+
+    #[test]
+    fn test_find_startup_preset_ignores_non_toml_files() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("notes.txt"), "irrelevant").expect("write");
+        assert!(find_startup_preset(dir.path()).is_none());
     }
 
     /// Test JSON-RPC initialize method.
@@ -1649,13 +1968,16 @@ complexity_threshold = 0.4
         let resp = server.handle_jsonrpc_line_unwrap(line);
         let result = resp.result.expect("initialize should have result");
 
-        let caps = result.get("capabilities")
+        let caps = result
+            .get("capabilities")
             .expect("initialize result must include capabilities");
-        let tools_cap = caps.get("tools")
+        let tools_cap = caps
+            .get("tools")
             .expect("capabilities must include 'tools' key");
 
         // Must be an object...
-        let tools_obj = tools_cap.as_object()
+        let tools_obj = tools_cap
+            .as_object()
             .expect("'tools' capability must be an object");
         // ...that is not empty. An empty {} is what issue #3 reported as
         // causing OpenCode to skip tools/list.
@@ -1691,7 +2013,11 @@ complexity_threshold = 0.4
         let (mut server, _dir) = make_server();
         let line = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"compress","arguments":{"text":"lorem ipsum dolor sit amet"}}}"#;
         let resp = server.handle_jsonrpc_line_unwrap(line);
-        assert!(resp.error.is_none(), "tools/call should not error: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "tools/call should not error: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("tools/call should have result");
         assert!(result.get("content").is_some());
     }
@@ -1733,7 +2059,8 @@ complexity_threshold = 0.4
         let resp = server.handle_jsonrpc_line_unwrap(line);
         assert!(resp.error.is_none(), "tools/list errored: {:?}", resp.error);
 
-        let tools = resp.result
+        let tools = resp
+            .result
             .expect("tools/list must have result")
             .get("tools")
             .cloned()
@@ -1914,7 +2241,10 @@ complexity_threshold = 0.4
             intent: None,
         };
         let resp = server.handle_tool_call(req).unwrap();
-        assert_eq!(resp.output, text, "passthrough must return byte-exact input");
+        assert_eq!(
+            resp.output, text,
+            "passthrough must return byte-exact input"
+        );
         assert_eq!(
             resp.tokens_original, resp.tokens_compressed,
             "passthrough is 1:1 so token counts must match"
@@ -2060,9 +2390,16 @@ complexity_threshold = 0.4
             // perform no I/O so can't collide with native tools.
             if matches!(
                 name,
-                "read_file" | "grep" | "list_dir" | "list_directory"
-                    | "search_files" | "write_file" | "delete_file"
-                    | "edit_file" | "execute_command" | "create_directory"
+                "read_file"
+                    | "grep"
+                    | "list_dir"
+                    | "list_directory"
+                    | "search_files"
+                    | "write_file"
+                    | "delete_file"
+                    | "edit_file"
+                    | "execute_command"
+                    | "create_directory"
             ) {
                 panic!(
                     "tool `{name}` shadows a host-native tool. \
@@ -2121,8 +2458,81 @@ complexity_threshold = 0.4
         let result = server.handle_tool_call(req);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("sqz_read_file"), "error should name the tool: {err}");
+        assert!(
+            err.contains("sqz_read_file"),
+            "error should name the tool: {err}"
+        );
         assert!(err.contains("xyz.txt"), "error should name the path: {err}");
+    }
+
+    #[test]
+    fn test_sqz_read_file_rejects_path_outside_workspace() {
+        // Regression test: sqz_read_file must not be able to read files
+        // outside its allowed root(s), e.g. /etc/hosts. Earlier versions
+        // had a doc comment describing this guard with no code enforcing
+        // it, so this test would have passed against the vulnerable
+        // implementation (the "error" would just be OS-level, not a
+        // deliberate rejection) — check for the specific "outside the
+        // allowed workspace" message to make sure the guard actually ran.
+        let (mut server, _dir) = make_server();
+        let req = ToolCallRequest {
+            tool_id: "sqz_read_file".to_string(),
+            input: serde_json::json!({ "path": "/etc/hosts" }),
+            intent: None,
+        };
+        let result = server.handle_tool_call(req);
+        assert!(result.is_err(), "/etc/hosts must be rejected, not read");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("outside the allowed workspace"),
+            "expected the allowlist guard to fire, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_sqz_read_file_rejects_traversal_out_of_workspace() {
+        // A relative `..` path that escapes the workspace root must also
+        // be rejected, not just literal absolute paths.
+        let (mut server, dir) = make_server();
+        let escape = dir.path().join("..").join("..").join("etc").join("hosts");
+        let req = ToolCallRequest {
+            tool_id: "sqz_read_file".to_string(),
+            input: serde_json::json!({ "path": escape.to_string_lossy() }),
+            intent: None,
+        };
+        let result = server.handle_tool_call(req);
+        assert!(
+            result.is_err(),
+            "traversal outside workspace must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_sqz_list_dir_rejects_path_outside_workspace() {
+        let (mut server, _dir) = make_server();
+        let req = ToolCallRequest {
+            tool_id: "sqz_list_dir".to_string(),
+            input: serde_json::json!({ "path": "/etc" }),
+            intent: None,
+        };
+        let result = server.handle_tool_call(req);
+        assert!(result.is_err(), "/etc must be rejected, not listed");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("outside the allowed workspace"), "got: {err}");
+    }
+
+    #[test]
+    fn test_sqz_grep_rejects_path_outside_workspace() {
+        let (mut server, _dir) = make_server();
+        let req = ToolCallRequest {
+            tool_id: "sqz_grep".to_string(),
+            input: serde_json::json!({ "pattern": "root", "path": "/etc" }),
+            intent: None,
+        };
+        let result = server.handle_tool_call(req);
+        assert!(result.is_err(), "/etc must be rejected, not searched");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("outside the allowed workspace"), "got: {err}");
     }
 
     #[test]
@@ -2264,7 +2674,11 @@ complexity_threshold = 0.4
 
         // Header reports how many hits, so the agent knows whether to
         // look at the matches or widen the search.
-        assert!(resp.output.contains("matches=1"), "header must include match count; got: {}", resp.output);
+        assert!(
+            resp.output.contains("matches=1"),
+            "header must include match count; got: {}",
+            resp.output
+        );
         assert!(
             resp.output.contains("TODO"),
             "match content must be present; got: {}",
@@ -2340,7 +2754,10 @@ complexity_threshold = 0.4
             intent: None,
         };
         let resp = server.handle_tool_call(req).expect("grep should succeed");
-        assert!(resp.output.contains("matches=10"),
-            "should stop at max_matches; got: {}", resp.output);
+        assert!(
+            resp.output.contains("matches=10"),
+            "should stop at max_matches; got: {}",
+            resp.output
+        );
     }
 }

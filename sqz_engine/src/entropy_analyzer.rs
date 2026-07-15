@@ -86,7 +86,8 @@ impl EntropyAnalyzer {
             return Vec::new();
         }
 
-        let (high_thresh, low_thresh) = Self::compute_thresholds(&blocks, self.high_percentile, self.low_percentile);
+        let (high_thresh, low_thresh) =
+            Self::compute_thresholds(&blocks, self.high_percentile, self.low_percentile);
 
         blocks
             .into_iter()

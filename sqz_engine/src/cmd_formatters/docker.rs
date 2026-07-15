@@ -9,7 +9,9 @@ pub fn format_docker(subcmd: Option<&str>, output: &str) -> Option<String> {
 
 fn format_docker_ps(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
-    if lines.is_empty() { return output.to_string(); }
+    if lines.is_empty() {
+        return output.to_string();
+    }
 
     let mut result = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -21,8 +23,16 @@ fn format_docker_ps(output: &str) -> String {
         if parts.len() >= 5 {
             let name = parts.last().unwrap_or(&"");
             let image = parts.get(1).unwrap_or(&"");
-            let status_parts: Vec<&&str> = parts.iter().skip(4).take_while(|p| !p.starts_with("0.0.0.0")).collect();
-            let status = status_parts.iter().map(|s| **s).collect::<Vec<_>>().join(" ");
+            let status_parts: Vec<&&str> = parts
+                .iter()
+                .skip(4)
+                .take_while(|p| !p.starts_with("0.0.0.0"))
+                .collect();
+            let status = status_parts
+                .iter()
+                .map(|s| **s)
+                .collect::<Vec<_>>()
+                .join(" ");
             result.push(format!("{} | {} | {}", name, image, status));
         } else {
             result.push(line.to_string());
@@ -33,7 +43,9 @@ fn format_docker_ps(output: &str) -> String {
 
 fn format_docker_images(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
-    if lines.is_empty() { return output.to_string(); }
+    if lines.is_empty() {
+        return output.to_string();
+    }
 
     let mut result = Vec::new();
     for (i, line) in lines.iter().enumerate() {

@@ -7,7 +7,6 @@
 ///
 /// The agent can call `sqz compact` to trigger eviction, or the engine
 /// can suggest eviction when the budget approaches the ceiling.
-
 use crate::error::Result;
 use crate::str_utils::safe_truncate;
 
@@ -138,7 +137,10 @@ pub fn evict(
     }
 
     let tokens_after: u32 = kept.iter().map(|i| i.tokens).sum::<u32>()
-        + evicted.iter().map(|e| estimate_tokens(&e.summary)).sum::<u32>();
+        + evicted
+            .iter()
+            .map(|e| estimate_tokens(&e.summary))
+            .sum::<u32>();
 
     let eviction_summary = if evicted.is_empty() {
         String::new()
@@ -156,11 +158,7 @@ pub fn evict(
 }
 
 /// Suggest whether eviction should be triggered based on current usage.
-pub fn should_evict(
-    total_tokens: u32,
-    budget_ceiling: u32,
-    warning_threshold: f64,
-) -> bool {
+pub fn should_evict(total_tokens: u32, budget_ceiling: u32, warning_threshold: f64) -> bool {
     if budget_ceiling == 0 {
         return false;
     }
@@ -176,11 +174,7 @@ pub fn should_evict(
 ///
 /// Recency: 1.0 for current turn, decays toward 0.0 as age increases.
 /// Frequency: log2(access_count + 1) normalized to [0, 1].
-fn compute_retention_score(
-    item: &ContextItem,
-    current_turn: u64,
-    config: &EvictionConfig,
-) -> f64 {
+fn compute_retention_score(item: &ContextItem, current_turn: u64, config: &EvictionConfig) -> f64 {
     // Pinned items get maximum score
     if item.pinned {
         return f64::MAX;
@@ -210,7 +204,10 @@ fn summarize_for_eviction(content: &str) -> String {
     };
     let line_count = content.lines().count();
     let char_count = content.len();
-    format!("[evicted: {} lines, {} chars] {}", line_count, char_count, truncated)
+    format!(
+        "[evicted: {} lines, {} chars] {}",
+        line_count, char_count, truncated
+    )
 }
 
 /// Format a summary of all evicted items.
@@ -298,8 +295,8 @@ mod tests {
     #[test]
     fn test_frequently_accessed_items_retained() {
         let items = vec![
-            make_item("old_frequent", 100, 2, 50),  // old but accessed 50 times
-            make_item("old_rare", 100, 2, 1),        // old and rarely accessed
+            make_item("old_frequent", 100, 2, 50), // old but accessed 50 times
+            make_item("old_rare", 100, 2, 1),      // old and rarely accessed
             make_item("recent", 100, 10, 1),
         ];
         let config = EvictionConfig {
@@ -328,15 +325,15 @@ mod tests {
             ..Default::default()
         };
         let result = evict(&items, 10, &config).unwrap();
-        assert!(result.kept.len() >= 2, "should keep at least min_keep items");
+        assert!(
+            result.kept.len() >= 2,
+            "should keep at least min_keep items"
+        );
     }
 
     #[test]
     fn test_eviction_summary_format() {
-        let items = vec![
-            make_item("old", 500, 0, 1),
-            make_item("recent", 100, 10, 1),
-        ];
+        let items = vec![make_item("old", 500, 0, 1), make_item("recent", 100, 10, 1)];
         let config = EvictionConfig {
             eviction_ratio: 0.5,
             min_keep: 1,
@@ -351,10 +348,10 @@ mod tests {
 
     #[test]
     fn test_should_evict_threshold() {
-        assert!(!should_evict(50000, 200000, 0.7));  // 25% usage
-        assert!(should_evict(150000, 200000, 0.7));   // 75% usage
-        assert!(should_evict(200000, 200000, 0.7));   // 100% usage
-        assert!(!should_evict(0, 0, 0.7));             // zero budget
+        assert!(!should_evict(50000, 200000, 0.7)); // 25% usage
+        assert!(should_evict(150000, 200000, 0.7)); // 75% usage
+        assert!(should_evict(200000, 200000, 0.7)); // 100% usage
+        assert!(!should_evict(0, 0, 0.7)); // zero budget
     }
 
     #[test]
@@ -373,7 +370,8 @@ mod tests {
         assert!(
             result.tokens_after <= result.tokens_before,
             "eviction should not increase token count: {} vs {}",
-            result.tokens_after, result.tokens_before
+            result.tokens_after,
+            result.tokens_before
         );
     }
 

@@ -1,9 +1,9 @@
-/// sqz compression benchmark suite.
-///
-/// Measures faithfulness, critical-info retention, and token reduction
-/// across representative content types. Used as CI regression gates.
-///
-/// Run with: `cargo test -p sqz-engine benchmarks`
+//! sqz compression benchmark suite.
+//!
+//! Measures faithfulness, critical-info retention, and token reduction
+//! across representative content types. Used as CI regression gates.
+//!
+//! Run with: `cargo test -p sqz-engine benchmarks`
 
 #[cfg(test)]
 mod tests {
@@ -35,9 +35,12 @@ mod tests {
 
         let original_tokens = estimate_tokens(input);
         let compressed_tokens = estimate_tokens(&result.data);
-        let reduction_pct = (1.0 - compressed_tokens as f64 / original_tokens.max(1) as f64) * 100.0;
+        let reduction_pct =
+            (1.0 - compressed_tokens as f64 / original_tokens.max(1) as f64) * 100.0;
 
-        let verify = result.verify.unwrap_or_else(|| Verifier::verify(input, &result.data));
+        let verify = result
+            .verify
+            .unwrap_or_else(|| Verifier::verify(input, &result.data));
         let critical_info_retained = result.data.contains(critical_marker);
 
         BenchResult {
@@ -59,20 +62,27 @@ mod tests {
         assert!(
             b.verify_confidence >= min_confidence,
             "[{}] verify confidence {:.2} < threshold {:.2}",
-            b.content_type, b.verify_confidence, min_confidence
+            b.content_type,
+            b.verify_confidence,
+            min_confidence
         );
         // Only assert reduction if input is large enough to compress meaningfully
         if b.original_tokens > 50 {
             assert!(
                 b.reduction_pct >= min_reduction,
                 "[{}] reduction {:.1}% < threshold {:.1}%",
-                b.content_type, b.reduction_pct, min_reduction
+                b.content_type,
+                b.reduction_pct,
+                min_reduction
             );
         }
         println!(
             "[bench] {} | {}→{} tokens | {:.1}% reduction | confidence {:.2}",
-            b.content_type, b.original_tokens, b.compressed_tokens,
-            b.reduction_pct, b.verify_confidence
+            b.content_type,
+            b.original_tokens,
+            b.compressed_tokens,
+            b.reduction_pct,
+            b.verify_confidence
         );
     }
 
@@ -127,7 +137,8 @@ mod tests {
         assert!(b.critical_info_retained, "critical info must be retained");
         assert!(
             b.verify_confidence >= 0.7,
-            "[prose_docs] confidence {:.2} too low", b.verify_confidence
+            "[prose_docs] confidence {:.2} too low",
+            b.verify_confidence
         );
         assert!(
             b.compressed_tokens <= b.original_tokens,
@@ -135,8 +146,11 @@ mod tests {
         );
         println!(
             "[bench] {} | {}→{} tokens | {:.1}% reduction | confidence {:.2}",
-            b.content_type, b.original_tokens, b.compressed_tokens,
-            b.reduction_pct, b.verify_confidence
+            b.content_type,
+            b.original_tokens,
+            b.compressed_tokens,
+            b.reduction_pct,
+            b.verify_confidence
         );
     }
 
@@ -150,12 +164,16 @@ mod tests {
         assert!(b.critical_info_retained, "panicked marker must be retained");
         assert!(
             b.verify_confidence >= 0.7,
-            "stack trace confidence {:.2} too low", b.verify_confidence
+            "stack trace confidence {:.2} too low",
+            b.verify_confidence
         );
         println!(
             "[bench] {} | {}→{} tokens | {:.1}% reduction | confidence {:.2}",
-            b.content_type, b.original_tokens, b.compressed_tokens,
-            b.reduction_pct, b.verify_confidence
+            b.content_type,
+            b.original_tokens,
+            b.compressed_tokens,
+            b.reduction_pct,
+            b.verify_confidence
         );
     }
 

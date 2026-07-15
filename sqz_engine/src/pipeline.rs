@@ -122,7 +122,9 @@ impl CompressionPipeline {
         // deep nesting, and redundant timestamps before other JSON processing
         if is_json && content.raw.len() > 100 {
             let proj_config = crate::json_projection::ProjectionConfig::default();
-            if let Ok(proj_result) = crate::json_projection::project_json(&content.raw, &proj_config) {
+            if let Ok(proj_result) =
+                crate::json_projection::project_json(&content.raw, &proj_config)
+            {
                 if proj_result.fields_removed > 0 {
                     content.raw = proj_result.data;
                     stages_applied.push("json_projection".to_owned());
@@ -145,8 +147,10 @@ impl CompressionPipeline {
                 if let Ok(rle_result) = crate::rle_compressor::rle_compress(&content.raw, 3) {
                     if rle_result.runs_collapsed > 0 {
                         // Safety check: verify critical markers are preserved
-                        let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
-                        let rle_has_error = rle_result.text.contains("ERROR") || rle_result.text.contains("error:");
+                        let has_error =
+                            content.raw.contains("ERROR") || content.raw.contains("error:");
+                        let rle_has_error =
+                            rle_result.text.contains("ERROR") || rle_result.text.contains("error:");
                         if !has_error || rle_has_error {
                             content.raw = rle_result.text;
                             stages_applied.push("rle".to_owned());
@@ -157,11 +161,14 @@ impl CompressionPipeline {
 
             // Sliding window dedup: catch repeated substrings across non-adjacent lines
             if !is_json && content.raw.len() > 300 {
-                if let Ok(sw_result) = crate::rle_compressor::sliding_window_dedup(&content.raw, 4) {
+                if let Ok(sw_result) = crate::rle_compressor::sliding_window_dedup(&content.raw, 4)
+                {
                     if sw_result.dedup_count > 0 {
                         // Safety check: verify critical markers are preserved
-                        let has_error = content.raw.contains("ERROR") || content.raw.contains("error:");
-                        let sw_has_error = sw_result.text.contains("ERROR") || sw_result.text.contains("error:");
+                        let has_error =
+                            content.raw.contains("ERROR") || content.raw.contains("error:");
+                        let sw_has_error =
+                            sw_result.text.contains("ERROR") || sw_result.text.contains("error:");
                         if !has_error || sw_has_error {
                             content.raw = sw_result.text;
                             stages_applied.push("sliding_window_dedup".to_owned());
@@ -448,9 +455,8 @@ mod tests {
     use super::*;
     use crate::preset::{
         BudgetConfig, CollapseArraysConfig, CompressionConfig, CondenseConfig,
-        CustomTransformsConfig, ModelConfig, PresetMeta,
-        StripNullsConfig, ToolSelectionConfig, TruncateStringsConfig,
-        TerseModeConfig,
+        CustomTransformsConfig, ModelConfig, PresetMeta, StripNullsConfig, TerseModeConfig,
+        ToolSelectionConfig, TruncateStringsConfig,
     };
 
     fn default_preset() -> Preset {
@@ -528,7 +534,9 @@ mod tests {
     fn compress_plain_text_passthrough() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("hello world", &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress("hello world", &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         assert_eq!(result.data, "hello world");
         assert!(!result.stages_applied.contains(&"toon_encode".to_owned()));
     }
@@ -538,7 +546,9 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"name":"Alice","age":30}"#;
-        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress(json, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         assert!(result.data.starts_with("TOON:"), "data: {}", result.data);
         assert!(result.stages_applied.contains(&"toon_encode".to_owned()));
     }
@@ -548,7 +558,9 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"a":1,"b":null}"#;
-        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress(json, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         // After strip_nulls, "b" is gone; TOON encodes the result
         assert!(result.data.starts_with("TOON:"));
         // Decode and verify null is gone
@@ -562,7 +574,9 @@ mod tests {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
         let input = "a".repeat(100);
-        let result = pipeline.compress(&input, &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress(&input, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         assert!(result.tokens_original > 0);
         assert!(result.tokens_compressed > 0);
     }
@@ -571,7 +585,9 @@ mod tests {
     fn compress_ratio_is_reasonable() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("hello", &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress("hello", &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         assert!(result.compression_ratio > 0.0);
     }
 
@@ -628,7 +644,9 @@ mod tests {
         });
         let pipeline = CompressionPipeline::new(&preset);
         let json = r#"{"id":1,"name":"Bob","debug":"x"}"#;
-        let result = pipeline.compress(json, &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress(json, &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         let decoded = ToonEncoder.decode(&result.data).unwrap();
         assert!(decoded.get("debug").is_none());
         assert_eq!(decoded["id"], serde_json::json!(1));
@@ -638,7 +656,9 @@ mod tests {
     fn compress_empty_string() {
         let preset = default_preset();
         let pipeline = CompressionPipeline::new(&preset);
-        let result = pipeline.compress("", &ctx(), &preset, CompressionMode::Default).unwrap();
+        let result = pipeline
+            .compress("", &ctx(), &preset, CompressionMode::Default)
+            .unwrap();
         assert_eq!(result.data, "");
         assert_eq!(result.tokens_original, 0);
     }
@@ -657,7 +677,10 @@ mod tests {
     fn repeated_line_fixture() -> String {
         let mut s = String::new();
         for i in 0..80 {
-            s.push_str(&format!("heartbeat check {} status ok all systems nominal\n", i % 3));
+            s.push_str(&format!(
+                "heartbeat check {} status ok all systems nominal\n",
+                i % 3
+            ));
         }
         s
     }
@@ -674,7 +697,10 @@ mod tests {
         // otherwise the Default/Safe tests below would pass vacuously.
         assert!(
             result.stages_applied.iter().any(|s| {
-                s == "rle" || s == "sliding_window_dedup" || s == "entropy_truncate" || s == "token_prune"
+                s == "rle"
+                    || s == "sliding_window_dedup"
+                    || s == "entropy_truncate"
+                    || s == "token_prune"
             }),
             "fixture should trigger at least one lossy stage in Aggressive mode, got: {:?}",
             result.stages_applied
@@ -689,7 +715,12 @@ mod tests {
         let result = pipeline
             .compress(&input, &ctx(), &preset, CompressionMode::Default)
             .unwrap();
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "Default mode ran lossy stage {:?}: {:?}",
@@ -709,7 +740,12 @@ mod tests {
         let result = pipeline
             .compress(&input, &ctx(), &preset, CompressionMode::Safe)
             .unwrap();
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "Safe mode ran lossy stage {:?}: {:?}",
@@ -739,19 +775,46 @@ mod tests {
         // which would make the "no dangling back-reference" assertion
         // below self-referentially meaningless.)
         let input = include_str!("context_evictor.rs");
-        assert!(input.lines().count() > 300, "fixture should be a substantial source file");
+        assert!(
+            input.lines().count() > 300,
+            "fixture should be a substantial source file"
+        );
 
         let result = pipeline
             .compress(input, &ctx(), &preset, CompressionMode::Default)
             .unwrap();
 
         let count = |s: &str, needle: char| s.chars().filter(|&c| c == needle).count();
-        assert_eq!(count(input, '{'), count(&result.data, '{'), "brace count changed");
-        assert_eq!(count(input, '}'), count(&result.data, '}'), "brace count changed");
-        assert_eq!(count(input, '('), count(&result.data, '('), "paren count changed");
-        assert_eq!(count(input, ')'), count(&result.data, ')'), "paren count changed");
-        assert!(!result.data.contains("[→L"), "dangling back-reference in output");
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        assert_eq!(
+            count(input, '{'),
+            count(&result.data, '{'),
+            "brace count changed"
+        );
+        assert_eq!(
+            count(input, '}'),
+            count(&result.data, '}'),
+            "brace count changed"
+        );
+        assert_eq!(
+            count(input, '('),
+            count(&result.data, '('),
+            "paren count changed"
+        );
+        assert_eq!(
+            count(input, ')'),
+            count(&result.data, ')'),
+            "paren count changed"
+        );
+        assert!(
+            !result.data.contains("[→L"),
+            "dangling back-reference in output"
+        );
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "Default mode ran lossy stage {:?} on real source file: {:?}",
@@ -812,11 +875,9 @@ mod tests {
 
         leaf.prop_recursive(4, 64, 8, |inner| {
             prop_oneof![
-                prop::collection::vec(inner.clone(), 0..8)
-                    .prop_map(serde_json::Value::Array),
-                prop::collection::hash_map(".*", inner, 0..8).prop_map(|m| {
-                    serde_json::Value::Object(m.into_iter().collect())
-                }),
+                prop::collection::vec(inner.clone(), 0..8).prop_map(serde_json::Value::Array),
+                prop::collection::hash_map(".*", inner, 0..8)
+                    .prop_map(|m| { serde_json::Value::Object(m.into_iter().collect()) }),
             ]
         })
     }
@@ -840,7 +901,7 @@ mod tests {
 
             for ch in result.data.chars() {
                 let cp = ch as u32;
-                let is_printable_ascii = cp >= 0x20 && cp <= 0x7E;
+                let is_printable_ascii = (0x20..=0x7E).contains(&cp);
                 let is_standard_whitespace = cp == 0x09 || cp == 0x0A || cp == 0x0D;
                 prop_assert!(
                     is_printable_ascii || is_standard_whitespace,
@@ -918,5 +979,3 @@ mod tests {
         }
     }
 }
-
-

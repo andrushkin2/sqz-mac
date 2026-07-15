@@ -62,8 +62,15 @@ fn format_pr_list_json(prs: &[serde_json::Value]) -> String {
         let number = pr.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
         let title = pr.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let state = pr.get("state").and_then(|v| v.as_str()).unwrap_or("OPEN");
-        let author = pr.get("author").and_then(|a| a.get("login")).and_then(|v| v.as_str()).unwrap_or("?");
-        result.push_str(&format!("  #{} {} [{}] @{}\n", number, title, state, author));
+        let author = pr
+            .get("author")
+            .and_then(|a| a.get("login"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        result.push_str(&format!(
+            "  #{} {} [{}] @{}\n",
+            number, title, state, author
+        ));
     }
     if prs.len() > CAP_LIST {
         result.push_str(&format!("  ...+{} more\n", prs.len() - CAP_LIST));
@@ -75,7 +82,11 @@ fn format_pr_detail_json(pr: &serde_json::Value) -> String {
     let number = pr.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
     let title = pr.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let state = pr.get("state").and_then(|v| v.as_str()).unwrap_or("");
-    let author = pr.get("author").and_then(|a| a.get("login")).and_then(|v| v.as_str()).unwrap_or("?");
+    let author = pr
+        .get("author")
+        .and_then(|a| a.get("login"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let additions = pr.get("additions").and_then(|v| v.as_u64()).unwrap_or(0);
     let deletions = pr.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0);
     let mergeable = pr.get("mergeable").and_then(|v| v.as_str()).unwrap_or("?");
@@ -94,7 +105,10 @@ fn format_issue_list_json(issues: &[serde_json::Value]) -> String {
     for issue in issues.iter().take(CAP_LIST) {
         let number = issue.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
         let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("");
-        let state = issue.get("state").and_then(|v| v.as_str()).unwrap_or("OPEN");
+        let state = issue
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("OPEN");
         result.push_str(&format!("  #{} {} [{}]\n", number, title, state));
     }
     if issues.len() > CAP_LIST {
@@ -107,9 +121,14 @@ fn format_issue_detail_json(issue: &serde_json::Value) -> String {
     let number = issue.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
     let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let state = issue.get("state").and_then(|v| v.as_str()).unwrap_or("");
-    let labels: Vec<&str> = issue.get("labels")
+    let labels: Vec<&str> = issue
+        .get("labels")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|l| l.get("name").and_then(|n| n.as_str())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|l| l.get("name").and_then(|n| n.as_str()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut out = format!("Issue #{} {} [{}]", number, title, state);
@@ -128,8 +147,15 @@ fn format_run_list_json(runs: &[serde_json::Value]) -> String {
         let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("?");
         let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
         let name = run.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-        let branch = run.get("headBranch").and_then(|v| v.as_str()).unwrap_or("?");
-        let display_status = if conclusion.is_empty() { status } else { conclusion };
+        let branch = run
+            .get("headBranch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let display_status = if conclusion.is_empty() {
+            status
+        } else {
+            conclusion
+        };
         result.push_str(&format!("  {} [{}] {}\n", name, display_status, branch));
     }
     if runs.len() > CAP_LIST {
@@ -142,8 +168,15 @@ fn format_run_detail_json(run: &serde_json::Value) -> String {
     let name = run.get("name").and_then(|v| v.as_str()).unwrap_or("?");
     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("?");
     let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
-    let branch = run.get("headBranch").and_then(|v| v.as_str()).unwrap_or("?");
-    let display_status = if conclusion.is_empty() { status } else { conclusion };
+    let branch = run
+        .get("headBranch")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let display_status = if conclusion.is_empty() {
+        status
+    } else {
+        conclusion
+    };
     format!("Run: {} [{}] branch:{}", name, display_status, branch)
 }
 
@@ -181,7 +214,8 @@ mod tests {
 
     #[test]
     fn test_run_list_json() {
-        let json = r#"[{"name":"CI","status":"completed","conclusion":"success","headBranch":"main"}]"#;
+        let json =
+            r#"[{"name":"CI","status":"completed","conclusion":"success","headBranch":"main"}]"#;
         let result = format_gh_run(json);
         assert!(result.contains("CI"));
         assert!(result.contains("success"));

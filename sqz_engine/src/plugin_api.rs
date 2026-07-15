@@ -184,7 +184,10 @@ impl PluginLoader {
         let p = parsed.plugin;
 
         // Convert toml::Value config to serde_json::Value
-        let config_json = p.config.map(toml_to_json).unwrap_or(serde_json::Value::Object(Default::default()));
+        let config_json = p
+            .config
+            .map(toml_to_json)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
 
         // Determine the binary path: prefer .so/.dylib/.dll, then .wasm
         let stem = toml_path.file_stem().unwrap_or_default();
@@ -206,7 +209,10 @@ impl PluginLoader {
     /// Register a native plugin directly (used in tests and by callers that
     /// construct plugins programmatically).
     pub fn register(&mut self, plugin: Box<dyn SqzPlugin>, config: serde_json::Value) {
-        self.loaded.push(LoadedPlugin { plugin: Arc::from(plugin), config });
+        self.loaded.push(LoadedPlugin {
+            plugin: Arc::from(plugin),
+            config,
+        });
     }
 }
 
@@ -302,10 +308,7 @@ fn toml_to_json(value: toml::Value) -> serde_json::Value {
             serde_json::Value::Array(arr.into_iter().map(toml_to_json).collect())
         }
         toml::Value::Table(tbl) => {
-            let map = tbl
-                .into_iter()
-                .map(|(k, v)| (k, toml_to_json(v)))
-                .collect();
+            let map = tbl.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect();
             serde_json::Value::Object(map)
         }
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
@@ -392,7 +395,9 @@ mod tests {
         assert_eq!(stages.len(), 1);
 
         let mut content = plain_content("hello world");
-        stages[0].process(&mut content, &enabled_stage_config()).unwrap();
+        stages[0]
+            .process(&mut content, &enabled_stage_config())
+            .unwrap();
         assert_eq!(content.raw, "HELLO WORLD");
     }
 
@@ -412,9 +417,18 @@ mod tests {
     #[test]
     fn get_stages_sorted_by_priority() {
         let mut loader = PluginLoader::new(Path::new("/tmp/nonexistent"));
-        loader.register(Box::new(UppercasePlugin { prio: 50 }), serde_json::json!({}));
-        loader.register(Box::new(UppercasePlugin { prio: 10 }), serde_json::json!({}));
-        loader.register(Box::new(UppercasePlugin { prio: 30 }), serde_json::json!({}));
+        loader.register(
+            Box::new(UppercasePlugin { prio: 50 }),
+            serde_json::json!({}),
+        );
+        loader.register(
+            Box::new(UppercasePlugin { prio: 10 }),
+            serde_json::json!({}),
+        );
+        loader.register(
+            Box::new(UppercasePlugin { prio: 30 }),
+            serde_json::json!({}),
+        );
 
         let stages = loader.get_stages();
         let priorities: Vec<u32> = stages.iter().map(|s| s.priority()).collect();
@@ -507,11 +521,7 @@ mod prop_tests {
         fn priority(&self) -> u32 {
             self.prio
         }
-        fn compress(
-            &self,
-            _content: &mut Content,
-            _config: &serde_json::Value,
-        ) -> Result<()> {
+        fn compress(&self, _content: &mut Content, _config: &serde_json::Value) -> Result<()> {
             Ok(())
         }
     }

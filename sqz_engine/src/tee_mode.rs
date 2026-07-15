@@ -4,7 +4,6 @@
 /// Saved outputs are timestamped files in a configurable directory.
 ///
 /// Requirements: 38.1, 38.2, 38.3, 38.4
-
 use crate::{Result, SqzError};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -13,7 +12,7 @@ use std::path::{Path, PathBuf};
 // ── TeeMode enum ─────────────────────────────────────────────────────────
 
 /// Controls when uncompressed output is saved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TeeMode {
     /// Save every command's uncompressed output.
@@ -21,13 +20,8 @@ pub enum TeeMode {
     /// Save only when the command exits with a non-zero code.
     Failures,
     /// Disabled (default).
+    #[default]
     Never,
-}
-
-impl Default for TeeMode {
-    fn default() -> Self {
-        Self::Never
-    }
 }
 
 impl std::fmt::Display for TeeMode {
@@ -189,13 +183,15 @@ impl TeeManager {
 
 /// Turn a command string into a short, filesystem-safe slug.
 fn sanitise_command(cmd: &str) -> String {
-    let base = cmd
-        .split_whitespace()
-        .take(3)
-        .collect::<Vec<_>>()
-        .join("-");
+    let base = cmd.split_whitespace().take(3).collect::<Vec<_>>().join("-");
     base.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(60)
         .collect()
 }
@@ -348,7 +344,9 @@ mod tests {
     #[test]
     fn sanitise_strips_special_chars() {
         let slug = sanitise_command("git log --oneline | head");
-        assert!(slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]

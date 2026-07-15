@@ -102,10 +102,7 @@ impl HookManager {
 
     /// Register a hook.
     pub fn register(&mut self, hook: Hook) {
-        self.hooks
-            .entry(hook.hook_type)
-            .or_default()
-            .push(hook);
+        self.hooks.entry(hook.hook_type).or_default().push(hook);
     }
 
     /// Fire all hooks of the given type and return the first non-Allow action,
@@ -118,14 +115,11 @@ impl HookManager {
         for hook in hooks {
             if let Some(ref filter) = hook.filter {
                 // Check filter against tool_name or command.
-                let matches = context
-                    .tool_name
-                    .as_deref()
-                    .map_or(false, |t| t == filter)
+                let matches = context.tool_name.as_deref().is_some_and(|t| t == filter)
                     || context
                         .command
                         .as_deref()
-                        .map_or(false, |c| c.contains(filter));
+                        .is_some_and(|c| c.contains(filter));
                 if !matches {
                     continue;
                 }
@@ -160,7 +154,6 @@ impl Default for HookManager {
     }
 }
 
-
 // ── Platform config generation ────────────────────────────────────────────
 
 /// Known platforms for `sqz init --agent <platform>`.
@@ -191,10 +184,8 @@ pub fn generate_platform_config(platform: &str) -> Option<String> {
         "continue" | "zed" => Some(generate_level1_config(platform)),
 
         // ── Level 2: Shell hook + MCP + hooks ─────────────────────────
-        "claude-code" | "cursor" | "copilot" | "windsurf" | "gemini-cli" | "codex"
-        | "opencode" | "goose" | "aider" | "amp" => {
-            Some(generate_level2_config(platform))
-        }
+        "claude-code" | "cursor" | "copilot" | "windsurf" | "gemini-cli" | "codex" | "opencode"
+        | "goose" | "aider" | "amp" => Some(generate_level2_config(platform)),
 
         _ => None,
     }
@@ -538,7 +529,10 @@ mod tests {
     fn test_generate_config_level1_platforms_produce_json() {
         for platform in &["continue", "zed"] {
             let config = generate_platform_config(platform).unwrap();
-            assert!(config.contains("mcpServers"), "missing mcpServers for {platform}");
+            assert!(
+                config.contains("mcpServers"),
+                "missing mcpServers for {platform}"
+            );
             assert!(config.contains("sqz-mcp"), "missing sqz-mcp for {platform}");
         }
     }
@@ -546,8 +540,16 @@ mod tests {
     #[test]
     fn test_generate_config_level2_platforms_produce_toml() {
         for platform in &[
-            "claude-code", "cursor", "copilot", "windsurf", "gemini-cli", "codex",
-            "opencode", "goose", "aider", "amp",
+            "claude-code",
+            "cursor",
+            "copilot",
+            "windsurf",
+            "gemini-cli",
+            "codex",
+            "opencode",
+            "goose",
+            "aider",
+            "amp",
         ] {
             let config = generate_platform_config(platform).unwrap();
             assert!(
@@ -558,10 +560,7 @@ mod tests {
                 config.contains("[hooks.session_start]"),
                 "missing session_start section for {platform}"
             );
-            assert!(
-                config.contains("sqz-mcp"),
-                "missing sqz-mcp for {platform}"
-            );
+            assert!(config.contains("sqz-mcp"), "missing sqz-mcp for {platform}");
         }
     }
 

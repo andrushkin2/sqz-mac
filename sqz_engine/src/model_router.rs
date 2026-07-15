@@ -265,7 +265,7 @@ mod tests {
             let decision = router.route(&task);
 
             // Score must be in [0.0, 1.0]
-            prop_assert!(score >= 0.0 && score <= 1.0,
+            prop_assert!((0.0..=1.0).contains(&score),
                 "score {} out of range", score);
 
             if !has_local {

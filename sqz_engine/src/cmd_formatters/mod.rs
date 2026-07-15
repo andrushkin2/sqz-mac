@@ -1,26 +1,30 @@
-mod preprocess;
-mod truncate;
-mod test_output;
-mod git;
 mod cargo;
-mod npm;
-mod docker;
-mod kubectl;
-mod system;
-mod js;
-mod lint;
-mod gh;
-mod python;
-mod go;
 mod cloud;
+mod docker;
+mod gh;
+mod git;
+mod go;
+mod js;
 mod jvm;
-mod ruby;
+mod kubectl;
+mod lint;
+mod npm;
+mod preprocess;
 #[cfg(test)]
 mod props;
+mod python;
+mod ruby;
+mod system;
+mod test_output;
+mod truncate;
 
 pub fn format_command(cmd: &str, output: &str) -> Option<String> {
     let cleaned = preprocess::clean(output);
-    let input = if cleaned.len() < output.len() { &cleaned } else { output };
+    let input = if cleaned.len() < output.len() {
+        &cleaned
+    } else {
+        output
+    };
 
     dispatch(cmd, input)
 }
@@ -36,7 +40,10 @@ fn dispatch(cmd: &str, output: &str) -> Option<String> {
         parts.drain(0..2);
     }
 
-    let base = parts.first().map(|s| s.rsplit('/').next().unwrap_or(s)).unwrap_or("");
+    let base = parts
+        .first()
+        .map(|s| s.rsplit('/').next().unwrap_or(s))
+        .unwrap_or("");
 
     match base {
         // Version control
@@ -127,7 +134,11 @@ mod tests {
     #[test]
     fn test_phase4_commands_dispatch() {
         assert!(format_command("aws s3 ls", "2024-01-01 bucket/file.txt").is_some());
-        assert!(format_command("terraform plan", "No changes. Infrastructure is up-to-date.").is_some());
+        assert!(format_command(
+            "terraform plan",
+            "No changes. Infrastructure is up-to-date."
+        )
+        .is_some());
         assert!(format_command("gradle build", "BUILD SUCCESSFUL in 3s").is_some());
         assert!(format_command("mvn compile", "[INFO] BUILD SUCCESS").is_some());
         assert!(format_command("kubectl describe pod nginx", "Name: nginx").is_some());
@@ -136,19 +147,13 @@ mod tests {
     #[test]
     fn test_ruby_commands_dispatch() {
         assert!(format_command("rspec", "1 example, 0 failures").is_some());
-        assert!(
-            format_command("rubocop", "10 files inspected, no offenses detected").is_some()
-        );
+        assert!(format_command("rubocop", "10 files inspected, no offenses detected").is_some());
         assert!(format_command(
             "rake test",
             "8 runs, 9 assertions, 0 failures, 0 errors, 0 skips"
         )
         .is_some());
-        assert!(format_command(
-            "bundle install",
-            "Bundle complete! 85 dependencies"
-        )
-        .is_some());
+        assert!(format_command("bundle install", "Bundle complete! 85 dependencies").is_some());
         // `bundle exec` prefix unwraps to the real tool.
         assert!(format_command("bundle exec rspec", "1 example, 0 failures").is_some());
         // Non-test rake tasks fall through to generic compression.

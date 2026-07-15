@@ -129,10 +129,10 @@ impl MinHashLsh {
         let mut min_hashes = vec![u64::MAX; NUM_HASHES];
 
         for shingle in &shingles {
-            for i in 0..NUM_HASHES {
+            for (i, min_hash) in min_hashes.iter_mut().enumerate() {
                 let h = Self::hash_with_seed(shingle, i as u64);
-                if h < min_hashes[i] {
-                    min_hashes[i] = h;
+                if h < *min_hash {
+                    *min_hash = h;
                 }
             }
         }
@@ -225,10 +225,17 @@ mod tests {
     #[test]
     fn test_similar_documents_are_candidates() {
         let mut lsh = MinHashLsh::new();
-        lsh.insert(1, "the quick brown fox jumps over the lazy dog and more text here");
-        lsh.insert(2, "the quick brown fox leaps over the lazy dog and more text here");
+        lsh.insert(
+            1,
+            "the quick brown fox jumps over the lazy dog and more text here",
+        );
+        lsh.insert(
+            2,
+            "the quick brown fox leaps over the lazy dog and more text here",
+        );
         // Query with text very similar to doc 1
-        let candidates = lsh.query("the quick brown fox jumps over the lazy dog and more text here");
+        let candidates =
+            lsh.query("the quick brown fox jumps over the lazy dog and more text here");
         assert!(
             candidates.contains(&1),
             "identical document should always be a candidate"
@@ -280,16 +287,16 @@ mod tests {
     fn test_multiple_inserts_and_query() {
         let mut lsh = MinHashLsh::new();
         for i in 0..10 {
-            lsh.insert(i, &format!("document number {i} with some shared content here"));
+            lsh.insert(
+                i,
+                &format!("document number {i} with some shared content here"),
+            );
         }
         assert_eq!(lsh.len(), 10);
         assert!(!lsh.is_empty());
 
         let candidates = lsh.query("document number 5 with some shared content here");
-        assert!(
-            candidates.contains(&5),
-            "exact match should be a candidate"
-        );
+        assert!(candidates.contains(&5), "exact match should be a candidate");
     }
 
     #[test]
@@ -327,7 +334,7 @@ mod tests {
             let sig_a = MinHashLsh::compute_signature(&a);
             let sig_b = MinHashLsh::compute_signature(&b);
             let sim = sig_a.jaccard_similarity(&sig_b);
-            prop_assert!(sim >= 0.0 && sim <= 1.0, "similarity out of bounds: {sim}");
+            prop_assert!((0.0..=1.0).contains(&sim), "similarity out of bounds: {sim}");
         }
 
         /// An inserted document is always returned as a candidate for its own text.

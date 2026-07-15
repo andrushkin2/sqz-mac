@@ -9,7 +9,6 @@
 //! Each level is a lossy compression of the previous level, but sqz controls
 //! what's lost (unlike the LLM's compaction which is unpredictable).
 
-
 /// Compression cascade level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CascadeLevel {
@@ -125,8 +124,10 @@ fn compress_aging(content: &str, file_path: &str) -> String {
             result.push(trimmed.to_string());
         }
         // Keep error/warning lines
-        if trimmed.contains("error") || trimmed.contains("Error")
-            || trimmed.contains("TODO") || trimmed.contains("FIXME")
+        if trimmed.contains("error")
+            || trimmed.contains("Error")
+            || trimmed.contains("TODO")
+            || trimmed.contains("FIXME")
         {
             result.push(trimmed.to_string());
         }
@@ -152,21 +153,23 @@ fn compress_aging(content: &str, file_path: &str) -> String {
 
 /// Level 2: File name + public API count.
 fn compress_old(content: &str, file_path: &str) -> String {
-    let pub_count = content.lines()
+    let pub_count = content
+        .lines()
         .filter(|l| {
             let t = l.trim();
-            t.starts_with("pub fn ") || t.starts_with("pub struct ")
-                || t.starts_with("pub enum ") || t.starts_with("pub trait ")
-                || t.starts_with("export ") || t.starts_with("def ")
+            t.starts_with("pub fn ")
+                || t.starts_with("pub struct ")
+                || t.starts_with("pub enum ")
+                || t.starts_with("pub trait ")
+                || t.starts_with("export ")
+                || t.starts_with("def ")
         })
         .count();
 
     let line_count = content.lines().count();
     let token_count = approx_tokens(content);
 
-    format!(
-        "[{file_path}: {line_count} lines, {pub_count} public items, ~{token_count} tokens]"
-    )
+    format!("[{file_path}: {line_count} lines, {pub_count} public items, ~{token_count} tokens]")
 }
 
 /// Level 3: One-line reference.

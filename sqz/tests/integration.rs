@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 /// End-to-end integration tests for the `sqz` binary.
 ///
 /// These tests build and invoke the actual binary, verifying real behaviour
@@ -5,7 +6,6 @@
 /// correctness, TOON encoding, entropy analysis, tee mode, and the hook
 /// system.
 use std::process::{Command, Output};
-use std::path::PathBuf;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -13,7 +13,7 @@ fn sqz_bin() -> PathBuf {
     // Use the debug build so tests run without --release.
     let mut p = std::env::current_exe().unwrap();
     p.pop(); // remove test binary name
-    // Cargo puts integration test binaries in deps/, step up one more.
+             // Cargo puts integration test binaries in deps/, step up one more.
     if p.ends_with("deps") {
         p.pop();
     }
@@ -53,7 +53,12 @@ fn run_with_stdin(args: &[&str], stdin: &str) -> Output {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("failed to spawn sqz");
-    child.stdin.as_mut().unwrap().write_all(stdin.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -71,7 +76,12 @@ fn run_with_stdin_and_home(args: &[&str], stdin: &str, home: &std::path::Path) -
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("failed to spawn sqz");
-    child.stdin.as_mut().unwrap().write_all(stdin.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -99,7 +109,10 @@ fn stderr(o: &Output) -> String {
 fn test_help_exits_zero() {
     let o = run(&["--help"]);
     assert!(o.status.success(), "sqz --help should exit 0");
-    assert!(stdout(&o).contains("compress"), "help should mention compress");
+    assert!(
+        stdout(&o).contains("compress"),
+        "help should mention compress"
+    );
 }
 
 #[test]
@@ -121,7 +134,10 @@ fn test_compress_plain_text_passthrough() {
     let o = run(&["compress", "hello world"]);
     assert!(o.status.success());
     let out = stdout(&o);
-    assert!(out.contains("hello world"), "plain text should pass through: {out}");
+    assert!(
+        out.contains("hello world"),
+        "plain text should pass through: {out}"
+    );
 }
 
 #[test]
@@ -141,7 +157,10 @@ fn test_compress_json_strips_nulls() {
     assert!(o.status.success());
     let out = stdout(&o);
     // null fields should be stripped
-    assert!(!out.contains("null"), "null fields should be stripped: {out}");
+    assert!(
+        !out.contains("null"),
+        "null fields should be stripped: {out}"
+    );
 }
 
 #[test]
@@ -152,7 +171,10 @@ fn test_compress_reports_token_reduction() {
     let err = stderr(&o);
     // stderr should contain token counts
     assert!(err.contains("tokens"), "should report token counts: {err}");
-    assert!(err.contains("%"), "should report reduction percentage: {err}");
+    assert!(
+        err.contains("%"),
+        "should report reduction percentage: {err}"
+    );
 }
 
 #[test]
@@ -161,8 +183,10 @@ fn test_compress_stdin() {
     assert!(o.status.success());
     let out = stdout(&o);
     // Output is either TOON-encoded (fresh) or a dedup reference (cached from prior run)
-    assert!(out.contains("TOON:") || out.starts_with("§ref:"),
-        "stdin JSON should be TOON-encoded or dedup ref: {out}");
+    assert!(
+        out.contains("TOON:") || out.starts_with("§ref:"),
+        "stdin JSON should be TOON-encoded or dedup ref: {out}"
+    );
 }
 
 #[test]
@@ -196,7 +220,10 @@ fn test_compress_ansi_stripped() {
     // ANSI codes should be stripped, text preserved
     assert!(out.contains("ERROR:"), "text should be preserved: {out}");
     assert!(out.contains("OK"), "text should be preserved: {out}");
-    assert!(!out.contains("\x1b["), "ANSI codes should be stripped: {out}");
+    assert!(
+        !out.contains("\x1b["),
+        "ANSI codes should be stripped: {out}"
+    );
 }
 
 // ── analyze ───────────────────────────────────────────────────────────────────
@@ -208,8 +235,10 @@ fn test_analyze_rust_file() {
     let out = stdout(&o);
     assert!(out.contains("block"), "should show blocks: {out}");
     assert!(out.contains("entropy"), "should show entropy scores: {out}");
-    assert!(out.contains("HighInfo") || out.contains("MediumInfo") || out.contains("LowInfo"),
-        "should classify blocks: {out}");
+    assert!(
+        out.contains("HighInfo") || out.contains("MediumInfo") || out.contains("LowInfo"),
+        "should classify blocks: {out}"
+    );
 }
 
 #[test]
@@ -241,7 +270,14 @@ fn complex_function(x: i32, y: i32) -> i32 {
 
 #[test]
 fn test_analyze_custom_thresholds() {
-    let o = run(&["analyze", "--high", "80", "--low", "20", "sqz_engine/src/toon.rs"]);
+    let o = run(&[
+        "analyze",
+        "--high",
+        "80",
+        "--low",
+        "20",
+        "sqz_engine/src/toon.rs",
+    ]);
     assert!(o.status.success());
     let out = stdout(&o);
     assert!(out.contains("block"), "should show blocks: {out}");
@@ -317,8 +353,10 @@ fn test_compress_preserves_error_fields() {
     assert!(o.status.success());
     let out = stdout(&o);
     // The error message should survive compression
-    assert!(out.contains("error") || out.contains("failed") || out.contains("503"),
-        "error fields should be preserved: {out}");
+    assert!(
+        out.contains("error") || out.contains("failed") || out.contains("503"),
+        "error fields should be preserved: {out}"
+    );
 }
 
 #[test]
@@ -327,7 +365,10 @@ fn test_compress_nested_json() {
     let o = run(&["compress", json]);
     assert!(o.status.success());
     let out = stdout(&o);
-    assert!(out.contains("TOON:"), "nested JSON should be TOON-encoded: {out}");
+    assert!(
+        out.contains("TOON:"),
+        "nested JSON should be TOON-encoded: {out}"
+    );
 }
 
 #[test]
@@ -336,7 +377,10 @@ fn test_compress_json_array() {
     let o = run(&["compress", json]);
     assert!(o.status.success());
     let out = stdout(&o);
-    assert!(out.contains("TOON:"), "JSON array should be TOON-encoded: {out}");
+    assert!(
+        out.contains("TOON:"),
+        "JSON array should be TOON-encoded: {out}"
+    );
 }
 
 #[test]
@@ -352,8 +396,10 @@ fn test_compress_multiline_cli_output() {
     assert!(o.status.success());
     let out = stdout(&o);
     // Errors and warnings should be preserved (or dedup ref if cached)
-    assert!(out.contains("error") || out.contains("warning") || out.starts_with("§ref:"),
-        "errors/warnings should be preserved or dedup ref returned: {out}");
+    assert!(
+        out.contains("error") || out.contains("warning") || out.starts_with("§ref:"),
+        "errors/warnings should be preserved or dedup ref returned: {out}"
+    );
 }
 
 // ── TOON round-trip via compress ──────────────────────────────────────────────
@@ -371,7 +417,9 @@ fn test_toon_output_is_ascii_safe() {
         }
         assert!(
             ch.is_ascii() && (ch as u8) >= 0x20,
-            "non-ASCII char in output: {:?} (U+{:04X})", ch, ch as u32
+            "non-ASCII char in output: {:?} (U+{:04X})",
+            ch,
+            ch as u32
         );
     }
 }
@@ -401,7 +449,10 @@ fn test_stats_starts_at_zero_in_fresh_home() {
     let o = run_with_home(&["stats"], home.path());
     assert!(o.status.success());
     let out = stdout(&o);
-    assert!(out.contains("Compressions           0"), "fresh HOME should start at zero: {out}");
+    assert!(
+        out.contains("Compressions           0"),
+        "fresh HOME should start at zero: {out}"
+    );
 }
 
 #[test]
@@ -410,7 +461,10 @@ fn test_compress_updates_stats_issue_18() {
 
     // Sanity: stats start at zero in this isolated HOME.
     let before = stdout(&run_with_home(&["stats"], home.path()));
-    assert!(before.contains("Compressions           0"), "precondition failed: {before}");
+    assert!(
+        before.contains("Compressions           0"),
+        "precondition failed: {before}"
+    );
 
     // Run a compression through the same path the shell hook uses:
     // `sqz compress --cmd <label>` reading from stdin.
@@ -420,12 +474,22 @@ fn test_compress_updates_stats_issue_18() {
         compress_input,
         home.path(),
     );
-    assert!(compress_out.status.success(), "compress should exit 0: {}", stderr(&compress_out));
+    assert!(
+        compress_out.status.success(),
+        "compress should exit 0: {}",
+        stderr(&compress_out)
+    );
 
     // Stats must now reflect exactly one compression.
     let after = stdout(&run_with_home(&["stats"], home.path()));
-    assert!(after.contains("Compressions           1"), "stats should show 1 compression: {after}");
-    assert!(!after.contains("Compressions           0"), "stats must not still read zero: {after}");
+    assert!(
+        after.contains("Compressions           1"),
+        "stats should show 1 compression: {after}"
+    );
+    assert!(
+        !after.contains("Compressions           0"),
+        "stats must not still read zero: {after}"
+    );
 }
 
 // ── dashboard ─────────────────────────────────────────────────────────────────
@@ -435,5 +499,8 @@ fn test_dashboard_help() {
     let o = run(&["dashboard", "--help"]);
     assert!(o.status.success());
     let out = stdout(&o);
-    assert!(out.contains("port") || out.contains("dashboard"), "should show dashboard help: {out}");
+    assert!(
+        out.contains("port") || out.contains("dashboard"),
+        "should show dashboard help: {out}"
+    );
 }

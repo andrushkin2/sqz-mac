@@ -44,18 +44,27 @@ fn format_gradle_build(output: &str) -> String {
             }
             return result;
         }
-        return output.lines().rev()
+        return output
+            .lines()
+            .rev()
             .find(|l| !l.trim().is_empty())
             .unwrap_or("ok")
             .to_string();
     }
 
-    let mut result = format!("BUILD FAILED: {} errors, {} warnings\n", errors.len(), warnings);
+    let mut result = format!(
+        "BUILD FAILED: {} errors, {} warnings\n",
+        errors.len(),
+        warnings
+    );
     for e in errors.iter().take(CAP_ERRORS) {
         result.push_str(&format!("  {}\n", e));
     }
     if errors.len() > CAP_ERRORS {
-        result.push_str(&format!("  ...+{} more errors\n", errors.len() - CAP_ERRORS));
+        result.push_str(&format!(
+            "  ...+{} more errors\n",
+            errors.len() - CAP_ERRORS
+        ));
     }
     result.trim().to_string()
 }
@@ -99,7 +108,9 @@ fn format_gradle_test(output: &str) -> String {
         return result.trim().to_string();
     }
 
-    output.lines().rev()
+    output
+        .lines()
+        .rev()
         .find(|l| !l.trim().is_empty())
         .unwrap_or("ok")
         .to_string()
@@ -113,8 +124,10 @@ fn format_mvn(output: &str) -> String {
     for line in output.lines() {
         let trimmed = line.trim();
         // Skip download progress
-        if trimmed.starts_with("Downloading") || trimmed.starts_with("Downloaded")
-            || trimmed.starts_with("Progress") {
+        if trimmed.starts_with("Downloading")
+            || trimmed.starts_with("Downloaded")
+            || trimmed.starts_with("Progress")
+        {
             continue;
         }
         if trimmed.contains("[ERROR]") {
@@ -134,7 +147,10 @@ fn format_mvn(output: &str) -> String {
             result.push_str(&format!("  {}\n", e));
         }
         if errors.len() > CAP_ERRORS {
-            result.push_str(&format!("  ...+{} more errors\n", errors.len() - CAP_ERRORS));
+            result.push_str(&format!(
+                "  ...+{} more errors\n",
+                errors.len() - CAP_ERRORS
+            ));
         }
         return result.trim().to_string();
     }
@@ -143,12 +159,21 @@ fn format_mvn(output: &str) -> String {
         return "ok".to_string();
     }
 
-    format!("{} errors:\n{}", errors.len(),
-        errors.iter().take(CAP_ERRORS).cloned().collect::<Vec<_>>().join("\n"))
+    format!(
+        "{} errors:\n{}",
+        errors.len(),
+        errors
+            .iter()
+            .take(CAP_ERRORS)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 fn extract_leading_number(s: &str) -> usize {
-    let num_str: String = s.chars()
+    let num_str: String = s
+        .chars()
         .skip_while(|c| !c.is_ascii_digit())
         .take_while(|c| c.is_ascii_digit())
         .collect();

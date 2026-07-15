@@ -2,12 +2,16 @@ pub const CAP_ERRORS: usize = 30;
 pub const CAP_WARNINGS: usize = 15;
 pub const CAP_LIST: usize = 30;
 
+// Not wired into any formatter yet (candidate helpers for capping error/
+// warning lists at CAP_ERRORS/CAP_WARNINGS above) — kept with test
+// coverage for when that lands, rather than deleted and re-written.
+#[allow(dead_code)]
 pub fn truncate_lines(lines: &[&str], cap: usize) -> String {
     if lines.len() <= cap {
         return lines.join("\n");
     }
     let mut result: Vec<&str> = lines[..cap].to_vec();
-    result.push(&"");
+    result.push("");
     let omitted = lines.len() - cap;
     let suffix = format!("...+{} more", omitted);
     let mut out = result.join("\n");
@@ -15,6 +19,7 @@ pub fn truncate_lines(lines: &[&str], cap: usize) -> String {
     out
 }
 
+#[allow(dead_code)]
 pub fn truncate_items(items: &[String], cap: usize) -> String {
     if items.len() <= cap {
         return items.join("\n");

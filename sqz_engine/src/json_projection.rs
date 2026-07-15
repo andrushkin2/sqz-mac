@@ -13,7 +13,6 @@
 ///
 /// The projection is conservative — it only removes fields that are
 /// demonstrably low-value for LLM comprehension.
-
 use crate::error::Result;
 
 /// Configuration for JSON projection.
@@ -93,8 +92,7 @@ pub fn project_json(input: &str, config: &ProjectionConfig) -> Result<Projection
 
     project_value(&mut value, config, 0, &mut fields_removed);
 
-    let projected = serde_json::to_string(&value)
-        .unwrap_or_else(|_| input.to_string());
+    let projected = serde_json::to_string(&value).unwrap_or_else(|_| input.to_string());
 
     let projected_tokens = estimate_tokens(&projected);
     let tokens_saved = original_tokens.saturating_sub(projected_tokens);
@@ -218,17 +216,18 @@ fn is_empty_collection(value: &serde_json::Value) -> bool {
 
 /// Remove redundant timestamp fields. If multiple fields end in `_at` or `_date`
 /// and have the same date prefix (YYYY-MM-DD), keep only the first one.
-fn dedup_timestamps(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    removed: &mut usize,
-) {
+fn dedup_timestamps(map: &mut serde_json::Map<String, serde_json::Value>, removed: &mut usize) {
     let timestamp_fields: Vec<(String, String)> = map
         .iter()
         .filter_map(|(k, v)| {
-            if (k.ends_with("_at") || k.ends_with("_date") || k.ends_with("_time"))
-                && v.is_string()
+            if (k.ends_with("_at") || k.ends_with("_date") || k.ends_with("_time")) && v.is_string()
             {
-                let date_prefix = v.as_str().unwrap_or("").chars().take(10).collect::<String>();
+                let date_prefix = v
+                    .as_str()
+                    .unwrap_or("")
+                    .chars()
+                    .take(10)
+                    .collect::<String>();
                 if date_prefix.len() == 10 && date_prefix.contains('-') {
                     return Some((k.clone(), date_prefix));
                 }
@@ -243,7 +242,8 @@ fn dedup_timestamps(
 
     // Group by date prefix
     let mut seen_dates: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut first_field_per_date: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut first_field_per_date: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut to_remove = Vec::new();
 
     for (field, date) in &timestamp_fields {
@@ -301,7 +301,10 @@ mod tests {
         assert!(parsed.get("name").is_some(), "name should be kept");
         assert!(parsed.get("_id").is_none(), "_id should be stripped");
         assert!(parsed.get("__v").is_none(), "__v should be stripped");
-        assert!(parsed.get("debug_info").is_none(), "debug_info should be stripped");
+        assert!(
+            parsed.get("debug_info").is_none(),
+            "debug_info should be stripped"
+        );
         assert!(result.fields_removed > 0);
     }
 
@@ -317,9 +320,18 @@ mod tests {
         let result = project_json(&serde_json::to_string(&input).unwrap(), &config).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result.data).unwrap();
         assert!(parsed.get("name").is_some());
-        assert!(parsed.get("tags").is_none(), "empty array should be stripped");
-        assert!(parsed.get("metadata").is_none(), "empty object should be stripped");
-        assert!(parsed.get("bio").is_none(), "empty string should be stripped");
+        assert!(
+            parsed.get("tags").is_none(),
+            "empty array should be stripped"
+        );
+        assert!(
+            parsed.get("metadata").is_none(),
+            "empty object should be stripped"
+        );
+        assert!(
+            parsed.get("bio").is_none(),
+            "empty string should be stripped"
+        );
     }
 
     #[test]
@@ -338,7 +350,8 @@ mod tests {
         let at_depth = &parsed["a"]["b"]["c"];
         assert!(
             at_depth.get("_sqz_summary").is_some() || result.fields_removed > 0,
-            "deep nesting should be truncated at max_depth: {:?}", parsed
+            "deep nesting should be truncated at max_depth: {:?}",
+            parsed
         );
     }
 
@@ -354,8 +367,14 @@ mod tests {
         let result = project_json(&serde_json::to_string(&input).unwrap(), &config).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result.data).unwrap();
         // Should keep created_at, drop one of the redundant same-day timestamps
-        assert!(parsed.get("created_at").is_some(), "created_at should be kept");
-        assert!(result.fields_removed > 0, "redundant timestamps should be removed");
+        assert!(
+            parsed.get("created_at").is_some(),
+            "created_at should be kept"
+        );
+        assert!(
+            result.fields_removed > 0,
+            "redundant timestamps should be removed"
+        );
     }
 
     #[test]

@@ -13,7 +13,6 @@
 /// merges sqz's entries into whichever exists; a fresh install defaults
 /// to `opencode.json`. See issue #6 for the reason the installer must
 /// look past the `.json` extension.
-
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
@@ -436,8 +435,8 @@ fn strip_trailing_commas(src: &str) -> String {
             if j < len && (bytes[j] == b']' || bytes[j] == b'}') {
                 // Drop the comma; emit the whitespace and let the
                 // main loop pick up the closing bracket.
-                for k in (i + 1)..j {
-                    out.push(bytes[k] as char);
+                for &b in bytes.iter().take(j).skip(i + 1) {
+                    out.push(b as char);
                 }
                 i = j;
                 continue;
@@ -475,12 +474,27 @@ pub fn update_opencode_config(project_dir: &Path) -> Result<bool> {
 /// to be dropped from a JSONC file during the merge. Used by the `sqz
 /// init` CLI to print a warning.
 pub fn update_opencode_config_detailed(project_dir: &Path) -> Result<(bool, bool)> {
+    update_opencode_config_detailed_with_mcp_path(project_dir, "sqz-mcp")
+}
+
+/// Same as [`update_opencode_config_detailed`], but registers `sqz_mcp_path`
+/// as the MCP server's `command[0]` instead of the bare `sqz-mcp` name.
+///
+/// OpenCode launches MCP servers directly (not through the user's login
+/// shell), so a bare `sqz-mcp` only resolves if it happens to be on
+/// PATH. Callers should pass the sibling of the resolved `sqz` binary
+/// path (see `sqz init`) so the registered command works regardless of
+/// PATH configuration.
+pub fn update_opencode_config_detailed_with_mcp_path(
+    project_dir: &Path,
+    sqz_mcp_path: &str,
+) -> Result<(bool, bool)> {
     let planned = plan_opencode_config_change(project_dir)?;
     if !planned.will_change {
         return Ok((false, false));
     }
     // Re-run through the same logic, actually writing this time.
-    apply_opencode_config_change(project_dir, &planned)
+    apply_opencode_config_change(project_dir, &planned, sqz_mcp_path)
 }
 
 /// Dry-run preview of what `update_opencode_config_detailed` would do.
@@ -496,7 +510,10 @@ pub fn update_opencode_config_detailed(project_dir: &Path) -> Result<(bool, bool
 /// configured, so users saw "no changes" and assumed the tool was
 /// broken.
 pub fn plan_opencode_config_change(project_dir: &Path) -> Result<PlannedOpencodeChange> {
-    compute_opencode_change(project_dir, /*apply=*/ false).map(|r| r.0)
+    // The dry-run only reports whether a write would happen and whether
+    // comments would be lost — the exact MCP command value doesn't
+    // affect either, so a placeholder path is fine here.
+    compute_opencode_change(project_dir, /*apply=*/ false, "sqz-mcp").map(|r| r.0)
 }
 
 /// Result of a dry-run over the OpenCode config.
@@ -515,8 +532,9 @@ pub struct PlannedOpencodeChange {
 fn apply_opencode_config_change(
     project_dir: &Path,
     _planned: &PlannedOpencodeChange,
+    sqz_mcp_path: &str,
 ) -> Result<(bool, bool)> {
-    let (planned, _) = compute_opencode_change(project_dir, /*apply=*/ true)?;
+    let (planned, _) = compute_opencode_change(project_dir, /*apply=*/ true, sqz_mcp_path)?;
     Ok((planned.will_change, planned.comments_lost))
 }
 
@@ -528,11 +546,15 @@ fn apply_opencode_config_change(
 fn compute_opencode_change(
     project_dir: &Path,
     apply: bool,
+    sqz_mcp_path: &str,
 ) -> Result<(PlannedOpencodeChange, ())> {
-    fn sqz_mcp_value() -> serde_json::Value {
+    fn sqz_mcp_value(sqz_mcp_path: &str) -> serde_json::Value {
         serde_json::json!({
             "type": "local",
-            "command": ["sqz-mcp", "--transport", "stdio"],
+            "command": [
+                sqz_mcp_path, "--transport", "stdio",
+                "--preset-dir", crate::tool_hooks::default_preset_dir_str(),
+            ],
             "enabled": true
         })
     }
@@ -585,7 +607,7 @@ fn compute_opencode_change(
         let mcp_entry = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
         if let Some(mcp_obj) = mcp_entry.as_object_mut() {
             if !mcp_obj.contains_key("sqz") {
-                mcp_obj.insert("sqz".to_string(), sqz_mcp_value());
+                mcp_obj.insert("sqz".to_string(), sqz_mcp_value(sqz_mcp_path));
                 changed = true;
             } else if let Some(sqz_entry) = mcp_obj.get_mut("sqz").and_then(|v| v.as_object_mut()) {
                 if !sqz_entry.contains_key("enabled") {
@@ -633,7 +655,7 @@ fn compute_opencode_change(
             let config = serde_json::json!({
                 "$schema": "https://opencode.ai/config.json",
                 "mcp": {
-                    "sqz": sqz_mcp_value()
+                    "sqz": sqz_mcp_value(sqz_mcp_path)
                 }
             });
             let content = serde_json::to_string_pretty(&config).map_err(|e| {
@@ -729,24 +751,17 @@ pub fn remove_sqz_from_opencode_config(project_dir: &Path) -> Result<Option<(Pat
 
     if essentially_empty {
         std::fs::remove_file(&path).map_err(|e| {
-            crate::error::SqzError::Other(format!(
-                "failed to remove {}: {e}",
-                path.display()
-            ))
+            crate::error::SqzError::Other(format!("failed to remove {}: {e}", path.display()))
         })?;
         return Ok(Some((path, true)));
     }
 
     // Otherwise write back the pruned config. This loses any comments
     // a `.jsonc` had; the caller should surface that fact to the user.
-    let updated = serde_json::to_string_pretty(&config).map_err(|e| {
-        crate::error::SqzError::Other(format!("failed to serialize config: {e}"))
-    })?;
+    let updated = serde_json::to_string_pretty(&config)
+        .map_err(|e| crate::error::SqzError::Other(format!("failed to serialize config: {e}")))?;
     std::fs::write(&path, format!("{updated}\n")).map_err(|e| {
-        crate::error::SqzError::Other(format!(
-            "failed to write {}: {e}",
-            path.display()
-        ))
+        crate::error::SqzError::Other(format!("failed to write {}: {e}", path.display()))
     })?;
     Ok(Some((path, true)))
 }
@@ -840,6 +855,15 @@ fn is_env_assignment(token: &str) -> bool {
 /// but when invoked via CLI (`sqz hook opencode`), we receive a combined
 /// JSON with both fields.
 pub fn process_opencode_hook(input: &str) -> Result<String> {
+    process_opencode_hook_with_cmd(input, "sqz")
+}
+
+/// Same as [`process_opencode_hook`], but the rewritten command pipes
+/// through `sqz_cmd` instead of the bare `sqz` name. Pass
+/// `std::env::current_exe()` here so the emitted pipe doesn't depend on
+/// `sqz` being on PATH — see `tool_hooks::process_hook_with_cmd` for the
+/// same fix applied to the other AI-tool hook formats.
+pub fn process_opencode_hook_with_cmd(input: &str, sqz_cmd: &str) -> Result<String> {
     let parsed: serde_json::Value = serde_json::from_str(input)
         .map_err(|e| crate::error::SqzError::Other(format!("opencode hook: invalid JSON: {e}")))?;
 
@@ -885,9 +909,25 @@ pub fn process_opencode_hook(input: &str) -> Result<String> {
 
     if matches!(
         base,
-        "vim" | "vi" | "nano" | "emacs" | "less" | "more" | "top" | "htop"
-            | "ssh" | "python" | "python3" | "node" | "irb" | "ghci"
-            | "psql" | "mysql" | "sqlite3" | "mongo" | "redis-cli"
+        "vim"
+            | "vi"
+            | "nano"
+            | "emacs"
+            | "less"
+            | "more"
+            | "top"
+            | "htop"
+            | "ssh"
+            | "python"
+            | "python3"
+            | "node"
+            | "irb"
+            | "ghci"
+            | "psql"
+            | "mysql"
+            | "sqlite3"
+            | "mongo"
+            | "redis-cli"
     ) || command.contains("--watch")
         || command.contains("run dev")
         || command.contains("run start")
@@ -926,8 +966,8 @@ pub fn process_opencode_hook(input: &str) -> Result<String> {
         command.to_string()
     };
     let rewritten = format!(
-        "{} 2>&1 | sqz compress --cmd {}",
-        exec_command, escaped_base,
+        "{} 2>&1 | {} compress --cmd {}",
+        exec_command, sqz_cmd, escaped_base,
     );
 
     // Output in the format OpenCode expects (same as Claude Code for CLI path)
@@ -1172,12 +1212,21 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["decision"].as_str().unwrap(), "approve");
         let cmd = parsed["args"]["command"].as_str().unwrap();
-        assert!(cmd.contains("sqz compress"), "should pipe through sqz: {cmd}");
-        assert!(cmd.contains("git status"), "should preserve original: {cmd}");
+        assert!(
+            cmd.contains("sqz compress"),
+            "should pipe through sqz: {cmd}"
+        );
+        assert!(
+            cmd.contains("git status"),
+            "should preserve original: {cmd}"
+        );
         // Issue #10: label is passed via `--cmd NAME` (shell-neutral),
         // not via the sh-specific `SQZ_CMD=NAME` prefix that breaks
         // PowerShell and cmd.exe.
-        assert!(cmd.contains("--cmd git"), "should pass base command via --cmd: {cmd}");
+        assert!(
+            cmd.contains("--cmd git"),
+            "should pass base command via --cmd: {cmd}"
+        );
         assert!(
             !cmd.contains("SQZ_CMD="),
             "must not emit legacy sh-style env prefix: {cmd}"
@@ -1268,9 +1317,7 @@ mod tests {
         let result = install_opencode_plugin("sqz");
         assert!(result.is_ok());
         // Plugin should be created at ~/.config/opencode/plugins/sqz.ts
-        let plugin_path = dir
-            .path()
-            .join(".config/opencode/plugins/sqz.ts");
+        let plugin_path = dir.path().join(".config/opencode/plugins/sqz.ts");
         assert!(plugin_path.exists(), "plugin file should exist");
         let content = std::fs::read_to_string(&plugin_path).unwrap();
         assert!(content.contains("SqzPlugin"));
@@ -1351,14 +1398,13 @@ mod tests {
     fn test_update_opencode_config_removes_legacy_sqz_plugin_entry() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("opencode.json");
-        std::fs::write(
-            &config_path,
-            r#"{"plugin":["other","sqz"]}"#,
-        )
-        .unwrap();
+        std::fs::write(&config_path, r#"{"plugin":["other","sqz"]}"#).unwrap();
 
         let changed = update_opencode_config(dir.path()).unwrap();
-        assert!(changed, "must report that the legacy plugin entry was stripped");
+        assert!(
+            changed,
+            "must report that the legacy plugin entry was stripped"
+        );
 
         let after = std::fs::read_to_string(&config_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&after).unwrap();
@@ -1497,9 +1543,7 @@ mod tests {
     #[test]
     fn test_process_opencode_hook_skips_bare_sqz_invocation() {
         for cmd in ["sqz stats", "sqz gain", "/usr/local/bin/sqz compress"] {
-            let input = format!(
-                r#"{{"tool":"bash","args":{{"command":"{cmd}"}}}}"#
-            );
+            let input = format!(r#"{{"tool":"bash","args":{{"command":"{cmd}"}}}}"#);
             let result = process_opencode_hook(&input).unwrap();
             assert_eq!(
                 result, input,
@@ -1659,13 +1703,28 @@ mod tests {
         )
         .unwrap();
 
-        let (changed, comments_lost) =
-            update_opencode_config_detailed(dir.path()).unwrap();
+        let (changed, comments_lost) = update_opencode_config_detailed(dir.path()).unwrap();
         assert!(changed);
         assert!(
             comments_lost,
             "merger must report that comments were dropped from .jsonc"
         );
+    }
+
+    #[test]
+    fn test_update_opencode_config_uses_resolved_sqz_mcp_path_not_bare_name() {
+        // Regression test: OpenCode launches MCP servers directly, not
+        // through the user's shell, so a bare "sqz-mcp" command silently
+        // fails to resolve unless it happens to be on PATH.
+        let dir = tempfile::tempdir().unwrap();
+        let (changed, _) =
+            update_opencode_config_detailed_with_mcp_path(dir.path(), "/opt/sqz/bin/sqz-mcp")
+                .unwrap();
+        assert!(changed);
+
+        let content = std::fs::read_to_string(dir.path().join("opencode.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(json["mcp"]["sqz"]["command"][0], "/opt/sqz/bin/sqz-mcp");
     }
 
     /// Issue #6 follow-up: dry-run must report no change when the
@@ -1710,8 +1769,10 @@ mod tests {
         let planned = plan_opencode_config_change(dir.path()).unwrap();
         assert!(planned.will_change);
         assert_eq!(planned.target_path, dir.path().join("opencode.json"));
-        assert!(!dir.path().join("opencode.json").exists(),
-            "dry-run must not create the file");
+        assert!(
+            !dir.path().join("opencode.json").exists(),
+            "dry-run must not create the file"
+        );
     }
 
     /// When no existing config is present, we still default to
@@ -1891,8 +1952,9 @@ mod tests {
         )
         .unwrap();
 
-        let (path, changed) =
-            remove_sqz_from_opencode_config(dir.path()).unwrap().unwrap();
+        let (path, changed) = remove_sqz_from_opencode_config(dir.path())
+            .unwrap()
+            .unwrap();
         assert_eq!(path, config);
         assert!(changed, "must report that sqz entries were removed");
         assert!(
@@ -1936,8 +1998,9 @@ mod tests {
         )
         .unwrap();
 
-        let (_, changed) =
-            remove_sqz_from_opencode_config(dir.path()).unwrap().unwrap();
+        let (_, changed) = remove_sqz_from_opencode_config(dir.path())
+            .unwrap()
+            .unwrap();
         assert!(changed);
         assert!(
             !config.exists(),
@@ -1971,11 +2034,15 @@ mod tests {
         )
         .unwrap();
 
-        let (path, changed) =
-            remove_sqz_from_opencode_config(dir.path()).unwrap().unwrap();
+        let (path, changed) = remove_sqz_from_opencode_config(dir.path())
+            .unwrap()
+            .unwrap();
         assert_eq!(path, jsonc);
         assert!(changed);
-        assert!(path.exists(), "jsonc file kept because `model` and `other` remain");
+        assert!(
+            path.exists(),
+            "jsonc file kept because `model` and `other` remain"
+        );
 
         let after = std::fs::read_to_string(&jsonc).unwrap();
         assert!(
@@ -2107,7 +2174,10 @@ mod tests {
         .unwrap();
 
         let changed = update_opencode_config(dir.path()).unwrap();
-        assert!(changed, "re-init must report a change (the legacy entry was stripped)");
+        assert!(
+            changed,
+            "re-init must report a change (the legacy entry was stripped)"
+        );
 
         let after = std::fs::read_to_string(&config).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&after).unwrap();

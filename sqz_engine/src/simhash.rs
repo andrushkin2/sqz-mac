@@ -5,7 +5,6 @@
 /// estimates cosine similarity (Charikar 2002).
 ///
 /// P(hash collision) = cos(θ)/π — this is a proven locality-sensitive hash.
-
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -52,18 +51,18 @@ pub fn simhash(text: &str) -> SimHashFingerprint {
 
     for token in &tokens {
         let h = hash_token(token);
-        for i in 0..64 {
+        for (i, bit) in v.iter_mut().enumerate() {
             if (h >> i) & 1 == 1 {
-                v[i] += 1;
+                *bit += 1;
             } else {
-                v[i] -= 1;
+                *bit -= 1;
             }
         }
     }
 
     let mut fingerprint: u64 = 0;
-    for i in 0..64 {
-        if v[i] > 0 {
+    for (i, &bit) in v.iter().enumerate() {
+        if bit > 0 {
             fingerprint |= 1u64 << i;
         }
     }
@@ -81,18 +80,18 @@ pub fn simhash_weighted(features: &[(String, f64)]) -> SimHashFingerprint {
 
     for (token, weight) in features {
         let h = hash_token(token);
-        for i in 0..64 {
+        for (i, bit) in v.iter_mut().enumerate() {
             if (h >> i) & 1 == 1 {
-                v[i] += weight;
+                *bit += weight;
             } else {
-                v[i] -= weight;
+                *bit -= weight;
             }
         }
     }
 
     let mut fingerprint: u64 = 0;
-    for i in 0..64 {
-        if v[i] > 0.0 {
+    for (i, &bit) in v.iter().enumerate() {
+        if bit > 0.0 {
             fingerprint |= 1u64 << i;
         }
     }
@@ -141,10 +140,17 @@ mod tests {
 
     #[test]
     fn test_similar_texts_close_hashes() {
-        let a = simhash("the quick brown fox jumps over the lazy dog and some more words to make it longer");
-        let b = simhash("the quick brown fox leaps over the lazy dog and some more words to make it longer");
+        let a = simhash(
+            "the quick brown fox jumps over the lazy dog and some more words to make it longer",
+        );
+        let b = simhash(
+            "the quick brown fox leaps over the lazy dog and some more words to make it longer",
+        );
         let dist = a.hamming_distance(&b);
-        assert!(dist < 32, "similar texts should have hamming distance < 32, got {dist}");
+        assert!(
+            dist < 32,
+            "similar texts should have hamming distance < 32, got {dist}"
+        );
     }
 
     #[test]
@@ -232,7 +238,7 @@ mod tests {
             let fa = SimHashFingerprint(a);
             let fb = SimHashFingerprint(b);
             let sim = fa.estimated_similarity(&fb);
-            prop_assert!(sim >= 0.0 && sim <= 1.0);
+            prop_assert!((0.0..=1.0).contains(&sim));
         }
 
         #[test]

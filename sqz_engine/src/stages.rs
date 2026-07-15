@@ -107,8 +107,9 @@ impl CompressionStage for StripFieldsStage {
             return Ok(());
         }
         let fields: Vec<String> = match config.options.get("fields") {
-            Some(v) => serde_json::from_value(v.clone())
-                .map_err(|e| SqzError::Other(format!("strip_fields: invalid fields option: {e}")))?,
+            Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+                SqzError::Other(format!("strip_fields: invalid fields option: {e}"))
+            })?,
             None => return Ok(()),
         };
         if fields.is_empty() {
@@ -374,6 +375,7 @@ impl CompressionStage for TruncateStringsStage {
 /// Config options:
 ///   - `max_items` (u32, default 5)
 ///   - `summary_template` (string, default "... and {remaining} more items")
+///
 /// Non-JSON content passes through unchanged.
 pub struct CollapseArraysStage;
 
@@ -472,9 +474,9 @@ fn collapse_arrays_recursive(
                     let table = encode_tabular(arr, &keys);
                     let count = arr.len();
                     arr.clear();
-                    arr.push(serde_json::Value::String(
-                        format!("[table: {count} rows]\n{table}"),
-                    ));
+                    arr.push(serde_json::Value::String(format!(
+                        "[table: {count} rows]\n{table}"
+                    )));
                     return;
                 }
 
@@ -686,11 +688,9 @@ fn replace_whole_word(text: &str, word: &str, replacement: &str) -> String {
         let end = start + word_len;
 
         // Check word boundary before
-        let before_ok = start == 0
-            || !text_bytes[start - 1].is_ascii_alphanumeric();
+        let before_ok = start == 0 || !text_bytes[start - 1].is_ascii_alphanumeric();
         // Check word boundary after
-        let after_ok = end >= text.len()
-            || !text_bytes[end].is_ascii_alphanumeric();
+        let after_ok = end >= text.len() || !text_bytes[end].is_ascii_alphanumeric();
 
         if before_ok && after_ok {
             result.push_str(&text[last_end..start]);
@@ -744,7 +744,7 @@ impl CompressionStage for GitDiffFoldStage {
             || content.raw.starts_with("diff -")
             || content.raw.contains("\n@@ ")       // hunk header
             || content.raw.contains("\n--- a/")    // unified diff file header
-            || content.raw.contains("\n+++ b/");   // unified diff file header
+            || content.raw.contains("\n+++ b/"); // unified diff file header
 
         if !looks_like_diff {
             return Ok(());
@@ -780,12 +780,12 @@ impl CompressionStage for GitDiffFoldStage {
             if is_changed[i] {
                 keep[i] = true;
                 // Keep max_ctx lines before
-                for j in i.saturating_sub(max_ctx)..i {
-                    keep[j] = true;
+                for slot in keep.iter_mut().take(i).skip(i.saturating_sub(max_ctx)) {
+                    *slot = true;
                 }
                 // Keep max_ctx lines after
-                for j in (i + 1)..n.min(i + 1 + max_ctx) {
-                    keep[j] = true;
+                for slot in keep.iter_mut().take(n.min(i + 1 + max_ctx)).skip(i + 1) {
+                    *slot = true;
                 }
             }
         }
@@ -946,7 +946,9 @@ mod tests {
     fn strip_fields_disabled_passthrough() {
         let raw = r#"{"id":1}"#;
         let mut c = json_content(raw);
-        StripFieldsStage.process(&mut c, &disabled_config()).unwrap();
+        StripFieldsStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, raw);
     }
 
@@ -1083,7 +1085,9 @@ mod tests {
         let long = "a".repeat(600);
         let raw = format!(r#"{{"key":"{}"}}"#, long);
         let mut c = json_content(&raw);
-        TruncateStringsStage.process(&mut c, &disabled_config()).unwrap();
+        TruncateStringsStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, raw);
     }
 
@@ -1117,7 +1121,9 @@ mod tests {
     fn collapse_arrays_disabled_passthrough() {
         let raw = r#"{"items":[1,2,3,4,5,6,7]}"#;
         let mut c = json_content(raw);
-        CollapseArraysStage.process(&mut c, &disabled_config()).unwrap();
+        CollapseArraysStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, raw);
     }
 
@@ -1155,9 +1161,17 @@ mod tests {
         // Hunk header must be preserved
         assert!(c.raw.contains("@@ -1,12"), "output: {}", c.raw);
         // Output should be shorter (folded lines 1-4 and 9-12)
-        assert!(c.raw.len() < diff.len(), "output should be shorter, got:\n{}", c.raw);
+        assert!(
+            c.raw.len() < diff.len(),
+            "output should be shorter, got:\n{}",
+            c.raw
+        );
         // Should contain fold markers
-        assert!(c.raw.contains("unchanged lines"), "expected fold markers in:\n{}", c.raw);
+        assert!(
+            c.raw.contains("unchanged lines"),
+            "expected fold markers in:\n{}",
+            c.raw
+        );
     }
 
     #[test]
@@ -1182,7 +1196,9 @@ mod tests {
     fn git_diff_fold_disabled_passthrough() {
         let diff = "diff --git a/f b/f\n-old\n+new\n unchanged\n unchanged\n unchanged\n";
         let mut c = text_content(diff);
-        GitDiffFoldStage.process(&mut c, &disabled_config()).unwrap();
+        GitDiffFoldStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, diff);
     }
 
@@ -1207,12 +1223,36 @@ mod tests {
         let cfg = enabled_config(serde_json::json!({"max_context_lines": 2}));
         GitDiffFoldStage.process(&mut c, &cfg).unwrap();
         // ALL directory entries must be preserved — none should be folded
-        assert!(c.raw.contains("packages"), "packages must survive: {}", c.raw);
-        assert!(c.raw.contains("configuration"), "configuration must survive: {}", c.raw);
-        assert!(c.raw.contains("documentation"), "documentation must survive: {}", c.raw);
-        assert!(c.raw.contains("environment"), "environment must survive: {}", c.raw);
-        assert!(c.raw.contains("README.md"), "README.md must survive: {}", c.raw);
-        assert!(!c.raw.contains("unchanged lines"), "no folding should occur: {}", c.raw);
+        assert!(
+            c.raw.contains("packages"),
+            "packages must survive: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("configuration"),
+            "configuration must survive: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("documentation"),
+            "documentation must survive: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("environment"),
+            "environment must survive: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("README.md"),
+            "README.md must survive: {}",
+            c.raw
+        );
+        assert!(
+            !c.raw.contains("unchanged lines"),
+            "no folding should occur: {}",
+            c.raw
+        );
     }
 
     #[test]
@@ -1258,15 +1298,28 @@ mod tests {
         let cfg = enabled_config(serde_json::json!({"max_context_lines": 2}));
         GitDiffFoldStage.process(&mut c, &cfg).unwrap();
         // Changed lines must be preserved
-        assert!(c.raw.contains("-old line"), "removed line preserved: {}", c.raw);
-        assert!(c.raw.contains("+new line"), "added line preserved: {}", c.raw);
+        assert!(
+            c.raw.contains("-old line"),
+            "removed line preserved: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("+new line"),
+            "added line preserved: {}",
+            c.raw
+        );
         // Should fold some context lines
-        assert!(c.raw.contains("unchanged lines"), "should fold context: {}", c.raw);
+        assert!(
+            c.raw.contains("unchanged lines"),
+            "should fold context: {}",
+            c.raw
+        );
         // Output should have fewer lines (fold markers replace multiple lines)
         assert!(
             c.raw.lines().count() < diff.lines().count(),
             "output should have fewer lines: {} vs {}",
-            c.raw.lines().count(), diff.lines().count()
+            c.raw.lines().count(),
+            diff.lines().count()
         );
     }
 
@@ -1285,7 +1338,9 @@ mod tests {
     fn custom_transforms_disabled_passthrough() {
         let raw = "some text";
         let mut c = text_content(raw);
-        CustomTransformsStage.process(&mut c, &disabled_config()).unwrap();
+        CustomTransformsStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, raw);
     }
 
@@ -1311,11 +1366,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&c.raw).unwrap();
         let arr = v["users"].as_array().unwrap();
         // Should be collapsed to a single tabular string element
-        assert_eq!(arr.len(), 1, "uniform array should be encoded as single table element");
+        assert_eq!(
+            arr.len(),
+            1,
+            "uniform array should be encoded as single table element"
+        );
         let table_str = arr[0].as_str().unwrap();
-        assert!(table_str.contains("[table: 6 rows]"), "should contain row count: {}", table_str);
-        assert!(table_str.contains("Alice"), "should contain data: {}", table_str);
-        assert!(table_str.contains("Frank"), "should contain all rows: {}", table_str);
+        assert!(
+            table_str.contains("[table: 6 rows]"),
+            "should contain row count: {}",
+            table_str
+        );
+        assert!(
+            table_str.contains("Alice"),
+            "should contain data: {}",
+            table_str
+        );
+        assert!(
+            table_str.contains("Frank"),
+            "should contain all rows: {}",
+            table_str
+        );
     }
 
     #[test]
@@ -1355,10 +1426,7 @@ mod tests {
 
     #[test]
     fn detect_uniform_array_returns_keys_for_uniform() {
-        let arr = vec![
-            json!({"a": 1, "b": 2}),
-            json!({"a": 3, "b": 4}),
-        ];
+        let arr = vec![json!({"a": 1, "b": 2}), json!({"a": 3, "b": 4})];
         let keys = detect_uniform_array(&arr);
         assert!(keys.is_some());
         let keys = keys.unwrap();
@@ -1368,10 +1436,7 @@ mod tests {
 
     #[test]
     fn detect_uniform_array_returns_none_for_mixed() {
-        let arr = vec![
-            json!({"a": 1, "b": 2}),
-            json!({"x": 3, "y": 4}),
-        ];
+        let arr = vec![json!({"a": 1, "b": 2}), json!({"x": 3, "y": 4})];
         assert!(detect_uniform_array(&arr).is_none());
     }
 
@@ -1419,9 +1484,21 @@ mod tests {
         let mut c = text_content(raw);
         let cfg = enabled_config(json!({}));
         WordAbbreviateStage.process(&mut c, &cfg).unwrap();
-        assert!(c.raw.contains("impl"), "should abbreviate 'implementation': {}", c.raw);
-        assert!(c.raw.contains("config"), "should abbreviate 'configuration': {}", c.raw);
-        assert!(!c.raw.contains("implementation"), "original word should be gone: {}", c.raw);
+        assert!(
+            c.raw.contains("impl"),
+            "should abbreviate 'implementation': {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("config"),
+            "should abbreviate 'configuration': {}",
+            c.raw
+        );
+        assert!(
+            !c.raw.contains("implementation"),
+            "original word should be gone: {}",
+            c.raw
+        );
     }
 
     #[test]
@@ -1431,14 +1508,20 @@ mod tests {
         let mut c = text_content(raw);
         let cfg = enabled_config(json!({}));
         WordAbbreviateStage.process(&mut c, &cfg).unwrap();
-        assert!(c.raw.contains("implement"), "partial match should be preserved: {}", c.raw);
+        assert!(
+            c.raw.contains("implement"),
+            "partial match should be preserved: {}",
+            c.raw
+        );
     }
 
     #[test]
     fn word_abbreviate_disabled_passthrough() {
         let raw = "The implementation is complete.";
         let mut c = text_content(raw);
-        WordAbbreviateStage.process(&mut c, &disabled_config()).unwrap();
+        WordAbbreviateStage
+            .process(&mut c, &disabled_config())
+            .unwrap();
         assert_eq!(c.raw, raw);
     }
 
@@ -1457,8 +1540,16 @@ mod tests {
         let mut c = text_content(raw);
         let cfg = enabled_config(json!({}));
         WordAbbreviateStage.process(&mut c, &cfg).unwrap();
-        assert!(c.raw.contains("impl"), "should handle mixed case: {}", c.raw);
-        assert!(c.raw.contains("config"), "should handle uppercase: {}", c.raw);
+        assert!(
+            c.raw.contains("impl"),
+            "should handle mixed case: {}",
+            c.raw
+        );
+        assert!(
+            c.raw.contains("config"),
+            "should handle uppercase: {}",
+            c.raw
+        );
     }
 
     #[test]

@@ -9,7 +9,9 @@ pub fn format_npm(subcmd: Option<&str>, output: &str) -> Option<String> {
         "audit" => Some(format_audit(output)),
         "outdated" => Some(format_outdated(output)),
         "run" => {
-            if output.trim().is_empty() { return Some("ok".to_string()); }
+            if output.trim().is_empty() {
+                return Some("ok".to_string());
+            }
             None
         }
         _ => None,
@@ -78,7 +80,8 @@ fn format_audit(output: &str) -> String {
         if trimmed.contains("vulnerabilities") {
             return trimmed.to_string();
         }
-        if trimmed.contains("severity") || trimmed.contains("Critical") || trimmed.contains("High") {
+        if trimmed.contains("severity") || trimmed.contains("Critical") || trimmed.contains("High")
+        {
             vulns.push(trimmed.to_string());
             total += 1;
         }
@@ -124,7 +127,8 @@ fn format_outdated(output: &str) -> String {
     }
 
     // npm outdated outputs a table: Package | Current | Wanted | Latest
-    let data_lines: Vec<&str> = lines.iter()
+    let data_lines: Vec<&str> = lines
+        .iter()
         .filter(|l| !l.is_empty() && !l.starts_with("Package"))
         .copied()
         .collect();
@@ -142,7 +146,11 @@ fn format_outdated(output: &str) -> String {
         result.push_str(&format!("...+{} more", data_lines.len() - CAP_LIST));
         result
     } else {
-        format!("{} outdated packages:\n{}", data_lines.len(), data_lines.join("\n"))
+        format!(
+            "{} outdated packages:\n{}",
+            data_lines.len(),
+            data_lines.join("\n")
+        )
     }
 }
 
@@ -172,7 +180,8 @@ mod tests {
 
     #[test]
     fn test_audit_json() {
-        let json = r#"{"metadata":{"vulnerabilities":{"critical":1,"high":2,"moderate":0,"low":3}}}"#;
+        let json =
+            r#"{"metadata":{"vulnerabilities":{"critical":1,"high":2,"moderate":0,"low":3}}}"#;
         let result = format_audit(json);
         assert!(result.contains("6 vulnerabilities"));
         assert!(result.contains("1 critical"));

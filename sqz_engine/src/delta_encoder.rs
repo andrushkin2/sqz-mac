@@ -8,7 +8,6 @@
 /// The similarity check uses a rolling hash fingerprint over fixed-size
 /// blocks to quickly determine if two pieces of content are "near-duplicate"
 /// (similarity > threshold) before computing the full diff.
-
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -140,21 +139,23 @@ impl DeltaEncoder {
         }
 
         // Build fingerprint set for old content
-        let old_hashes: HashMap<u64, usize> = old_lines
-            .iter()
-            .map(|l| line_hash(l))
-            .fold(HashMap::new(), |mut acc, h| {
-                *acc.entry(h).or_insert(0) += 1;
-                acc
-            });
+        let old_hashes: HashMap<u64, usize> =
+            old_lines
+                .iter()
+                .map(|l| line_hash(l))
+                .fold(HashMap::new(), |mut acc, h| {
+                    *acc.entry(h).or_insert(0) += 1;
+                    acc
+                });
 
-        let new_hashes: HashMap<u64, usize> = new_lines
-            .iter()
-            .map(|l| line_hash(l))
-            .fold(HashMap::new(), |mut acc, h| {
-                *acc.entry(h).or_insert(0) += 1;
-                acc
-            });
+        let new_hashes: HashMap<u64, usize> =
+            new_lines
+                .iter()
+                .map(|l| line_hash(l))
+                .fold(HashMap::new(), |mut acc, h| {
+                    *acc.entry(h).or_insert(0) += 1;
+                    acc
+                });
 
         // Count shared line hashes (min of counts)
         let mut shared = 0usize;
@@ -494,7 +495,7 @@ mod tests {
         ) {
             let enc = DeltaEncoder::new();
             let sim = enc.similarity(&old, &new);
-            prop_assert!(sim >= 0.0 && sim <= 1.0, "similarity out of bounds: {sim}");
+            prop_assert!((0.0..=1.0).contains(&sim), "similarity out of bounds: {sim}");
         }
 
         /// Similarity of identical content is 1.0.

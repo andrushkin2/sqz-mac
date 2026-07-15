@@ -66,8 +66,7 @@ pub fn claude_md_path(project_dir: &Path) -> PathBuf {
 pub fn claude_user_json_path() -> Option<PathBuf> {
     // Honour $HOME (standard on Unix, set explicitly on Windows when
     // Claude Code is installed in the user-scope convention).
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))?;
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     Some(PathBuf::from(home).join(".claude.json"))
 }
 
@@ -184,9 +183,8 @@ pub fn install_claude_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
     let block = claude_md_guidance_block(sqz_path);
 
     if path.exists() {
-        let existing = std::fs::read_to_string(&path).map_err(|e| {
-            SqzError::Other(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let existing = std::fs::read_to_string(&path)
+            .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
         if claude_md_has_sqz_block(&existing) {
             return Ok(false);
         }
@@ -201,9 +199,8 @@ pub fn install_claude_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
             new_content.push('\n');
         }
         new_content.push_str(&block);
-        std::fs::write(&path, new_content).map_err(|e| {
-            SqzError::Other(format!("failed to write {}: {e}", path.display()))
-        })?;
+        std::fs::write(&path, new_content)
+            .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
         return Ok(true);
     }
 
@@ -216,9 +213,8 @@ pub fn install_claude_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
          \n",
     );
     content.push_str(&block);
-    std::fs::write(&path, content).map_err(|e| {
-        SqzError::Other(format!("failed to write {}: {e}", path.display()))
-    })?;
+    std::fs::write(&path, content)
+        .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     Ok(true)
 }
 
@@ -231,17 +227,14 @@ pub fn install_claude_md_guidance(project_dir: &Path, sqz_path: &str) -> Result<
 ///
 /// Returns the path plus a flag indicating whether anything changed.
 /// Missing file or missing block → `(path, false)`.
-pub fn remove_claude_md_guidance(
-    project_dir: &Path,
-) -> Result<Option<(PathBuf, bool)>> {
+pub fn remove_claude_md_guidance(project_dir: &Path) -> Result<Option<(PathBuf, bool)>> {
     let path = claude_md_path(project_dir);
     if !path.exists() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        SqzError::Other(format!("failed to read {}: {e}", path.display()))
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
 
     let begin_idx = match content.find(CLAUDE_MD_BEGIN) {
         Some(i) => i,
@@ -269,9 +262,8 @@ pub fn remove_claude_md_guidance(
     }
     // And forwards to include the trailing newline on the END line.
     let mut end = after_end_idx;
-    while end < content.len() && content.as_bytes()[end] == b'\n' {
-        end += 1;
-        break; // Exactly one trailing newline.
+    if end < content.len() && content.as_bytes()[end] == b'\n' {
+        end += 1; // Exactly one trailing newline.
     }
 
     let mut new_content = String::with_capacity(content.len() - (end - start));
@@ -288,13 +280,11 @@ pub fn remove_claude_md_guidance(
         || remaining_trimmed.is_empty();
 
     if is_only_preamble {
-        std::fs::remove_file(&path).map_err(|e| {
-            SqzError::Other(format!("failed to delete {}: {e}", path.display()))
-        })?;
+        std::fs::remove_file(&path)
+            .map_err(|e| SqzError::Other(format!("failed to delete {}: {e}", path.display())))?;
     } else {
-        std::fs::write(&path, new_content).map_err(|e| {
-            SqzError::Other(format!("failed to write {}: {e}", path.display()))
-        })?;
+        std::fs::write(&path, new_content)
+            .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     }
 
     Ok(Some((path, true)))
@@ -330,20 +320,33 @@ const SQZ_MCP_SENTINEL_KEY: &str = "_sqz_managed";
 ///     or user-customised).
 ///   * `Err(_)` on JSON parse error or write failure.
 pub fn install_claude_mcp_config() -> Result<bool> {
-    install_claude_mcp_config_at(None)
+    install_claude_mcp_config_at(None, "sqz-mcp")
+}
+
+/// Same as [`install_claude_mcp_config`], but registers `sqz_mcp_path` as
+/// the server's `command` instead of the bare `sqz-mcp` name.
+///
+/// Claude Code launches MCP servers directly (not through the user's
+/// login shell), so a bare `sqz-mcp` only resolves if it's on PATH.
+/// Callers should pass the sibling of the resolved `sqz` binary path
+/// (see `sqz init`) so the registered command works regardless of PATH
+/// configuration.
+pub fn install_claude_mcp_config_with_path(sqz_mcp_path: &str) -> Result<bool> {
+    install_claude_mcp_config_at(None, sqz_mcp_path)
 }
 
 /// Internal: accept a home-dir override so tests can point at a tempdir
 /// without touching `env::set_var("HOME")` — that mutates process-wide
 /// state and races with parallel tests that also read HOME (e.g. the
 /// api_proxy property tests that open `~/.sqz/sessions.db`).
-pub(crate) fn install_claude_mcp_config_at(home_override: Option<&Path>) -> Result<bool> {
+pub(crate) fn install_claude_mcp_config_at(
+    home_override: Option<&Path>,
+    sqz_mcp_path: &str,
+) -> Result<bool> {
     let path = match home_override {
         Some(h) => h.join(".claude.json"),
         None => claude_user_json_path().ok_or_else(|| {
-            SqzError::Other(
-                "cannot resolve $HOME — ~/.claude.json location unknown".to_string(),
-            )
+            SqzError::Other("cannot resolve $HOME — ~/.claude.json location unknown".to_string())
         })?,
     };
 
@@ -356,16 +359,13 @@ pub(crate) fn install_claude_mcp_config_at(home_override: Option<&Path>) -> Resu
     }
 
     let mut root: serde_json::Value = if path.exists() {
-        let text = std::fs::read_to_string(&path).map_err(|e| {
-            SqzError::Other(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
         if text.trim().is_empty() {
             serde_json::json!({})
         } else {
             serde_json::from_str(&text).map_err(|e| {
-                SqzError::Other(format!(
-                    "~/.claude.json exists but is not valid JSON: {e}"
-                ))
+                SqzError::Other(format!("~/.claude.json exists but is not valid JSON: {e}"))
             })?
         }
     } else {
@@ -376,9 +376,7 @@ pub(crate) fn install_claude_mcp_config_at(home_override: Option<&Path>) -> Resu
     // object; anything else is user corruption we shouldn't rewrite).
     let root_obj = root
         .as_object_mut()
-        .ok_or_else(|| SqzError::Other(
-            "~/.claude.json root must be a JSON object".to_string(),
-        ))?;
+        .ok_or_else(|| SqzError::Other("~/.claude.json root must be a JSON object".to_string()))?;
 
     // Ensure mcpServers is an object.
     let mcp = root_obj
@@ -387,9 +385,7 @@ pub(crate) fn install_claude_mcp_config_at(home_override: Option<&Path>) -> Resu
     if !mcp.is_object() {
         *mcp = serde_json::json!({});
     }
-    let mcp_obj = mcp
-        .as_object_mut()
-        .expect("just ensured mcp is an object");
+    let mcp_obj = mcp.as_object_mut().expect("just ensured mcp is an object");
 
     // Already present? Don't overwrite — the user may have customised
     // the command or args. Respect that by leaving the entry alone
@@ -401,20 +397,21 @@ pub(crate) fn install_claude_mcp_config_at(home_override: Option<&Path>) -> Resu
     mcp_obj.insert(
         "sqz".to_string(),
         serde_json::json!({
-            "command": "sqz-mcp",
-            "args": ["--transport", "stdio"],
+            "command": sqz_mcp_path,
+            "args": [
+                "--transport", "stdio",
+                "--preset-dir", crate::tool_hooks::default_preset_dir_str(),
+            ],
             SQZ_MCP_SENTINEL_KEY: true
         }),
     );
 
     // Write back with a two-space indent (matches Claude Code's own
     // formatting so diffs stay clean).
-    let out = serde_json::to_string_pretty(&root).map_err(|e| {
-        SqzError::Other(format!("failed to serialize ~/.claude.json: {e}"))
-    })?;
-    std::fs::write(&path, out).map_err(|e| {
-        SqzError::Other(format!("failed to write {}: {e}", path.display()))
-    })?;
+    let out = serde_json::to_string_pretty(&root)
+        .map_err(|e| SqzError::Other(format!("failed to serialize ~/.claude.json: {e}")))?;
+    std::fs::write(&path, out)
+        .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     Ok(true)
 }
 
@@ -446,9 +443,8 @@ pub(crate) fn remove_claude_mcp_config_at(
         return Ok(None);
     }
 
-    let text = std::fs::read_to_string(&path).map_err(|e| {
-        SqzError::Other(format!("failed to read {}: {e}", path.display()))
-    })?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| SqzError::Other(format!("failed to read {}: {e}", path.display())))?;
     let mut root: serde_json::Value = match serde_json::from_str(&text) {
         Ok(v) => v,
         Err(_) => {
@@ -461,7 +457,9 @@ pub(crate) fn remove_claude_mcp_config_at(
         let Some(root_obj) = root.as_object_mut() else {
             return Ok(Some((path, false)));
         };
-        let Some(mcp) = root_obj.get_mut("mcpServers").and_then(|v| v.as_object_mut())
+        let Some(mcp) = root_obj
+            .get_mut("mcpServers")
+            .and_then(|v| v.as_object_mut())
         else {
             return Ok(Some((path, false)));
         };
@@ -477,12 +475,10 @@ pub(crate) fn remove_claude_mcp_config_at(
     };
 
     if changed {
-        let out = serde_json::to_string_pretty(&root).map_err(|e| {
-            SqzError::Other(format!("failed to serialize ~/.claude.json: {e}"))
-        })?;
-        std::fs::write(&path, out).map_err(|e| {
-            SqzError::Other(format!("failed to write {}: {e}", path.display()))
-        })?;
+        let out = serde_json::to_string_pretty(&root)
+            .map_err(|e| SqzError::Other(format!("failed to serialize ~/.claude.json: {e}")))?;
+        std::fs::write(&path, out)
+            .map_err(|e| SqzError::Other(format!("failed to write {}: {e}", path.display())))?;
     }
 
     Ok(Some((path, changed)))
@@ -518,8 +514,7 @@ mod tests {
     #[test]
     fn install_creates_new_claude_md() {
         let dir = TempDir::new().unwrap();
-        let changed =
-            install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
+        let changed = install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
         assert!(changed);
         let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
         assert!(content.starts_with("# CLAUDE.md"));
@@ -537,8 +532,7 @@ mod tests {
         )
         .unwrap();
 
-        let changed =
-            install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
+        let changed = install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
         assert!(changed);
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -558,8 +552,7 @@ mod tests {
     fn install_is_idempotent() {
         let dir = TempDir::new().unwrap();
         install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
-        let second = install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz")
-            .unwrap();
+        let second = install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
         assert!(!second, "second install must be a no-op");
 
         let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
@@ -587,8 +580,7 @@ mod tests {
         .unwrap();
 
         install_claude_md_guidance(dir.path(), "/usr/local/bin/sqz").unwrap();
-        let (_returned_path, changed) =
-            remove_claude_md_guidance(dir.path()).unwrap().unwrap();
+        let (_returned_path, changed) = remove_claude_md_guidance(dir.path()).unwrap().unwrap();
         assert!(changed);
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -611,7 +603,10 @@ mod tests {
         assert!(path.exists());
 
         remove_claude_md_guidance(dir.path()).unwrap();
-        assert!(!path.exists(), "pure-sqz CLAUDE.md should be deleted on uninstall");
+        assert!(
+            !path.exists(),
+            "pure-sqz CLAUDE.md should be deleted on uninstall"
+        );
     }
 
     #[test]
@@ -638,20 +633,43 @@ mod tests {
     #[test]
     fn install_mcp_creates_new_config() {
         let dir = TempDir::new().unwrap();
-        let changed = install_claude_mcp_config_at(Some(dir.path())).unwrap();
+        let changed = install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(changed);
 
         let path = dir.path().join(".claude.json");
         let content = std::fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(json["mcpServers"]["sqz"]["command"], "sqz-mcp");
-        assert_eq!(
-            json["mcpServers"]["sqz"]["args"],
-            serde_json::json!(["--transport", "stdio"])
+        let args = json["mcpServers"]["sqz"]["args"].as_array().unwrap();
+        assert!(
+            args.iter().any(|a| a == "--transport") && args.iter().any(|a| a == "stdio"),
+            "args must request stdio transport: {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "--preset-dir"),
+            "args must pass --preset-dir so the server picks up existing \
+             presets at startup, not just via hot-reload: {args:?}"
         );
         // Sentinel so uninstall can distinguish sqz-managed from
         // user-edited entries.
         assert_eq!(json["mcpServers"]["sqz"][SQZ_MCP_SENTINEL_KEY], true);
+    }
+
+    #[test]
+    fn install_mcp_uses_resolved_sqz_mcp_path_not_bare_name() {
+        // Regression test: Claude Code launches MCP servers directly, not
+        // through the user's shell, so a bare "sqz-mcp" command silently
+        // fails to resolve unless it happens to be on PATH. The installer
+        // must write whatever resolved path the caller passes in.
+        let dir = TempDir::new().unwrap();
+        let changed =
+            install_claude_mcp_config_at(Some(dir.path()), "/opt/sqz/bin/sqz-mcp").unwrap();
+        assert!(changed);
+
+        let path = dir.path().join(".claude.json");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(json["mcpServers"]["sqz"]["command"], "/opt/sqz/bin/sqz-mcp");
     }
 
     #[test]
@@ -668,13 +686,9 @@ mod tests {
                 }
             }
         });
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&existing).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
 
-        install_claude_mcp_config_at(Some(dir.path())).unwrap();
+        install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -689,8 +703,8 @@ mod tests {
     #[test]
     fn install_mcp_is_idempotent() {
         let dir = TempDir::new().unwrap();
-        install_claude_mcp_config_at(Some(dir.path())).unwrap();
-        let second = install_claude_mcp_config_at(Some(dir.path())).unwrap();
+        install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
+        let second = install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(!second, "second install must be a no-op");
     }
 
@@ -711,22 +725,15 @@ mod tests {
                 }
             }
         });
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&user_config).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&user_config).unwrap()).unwrap();
 
-        let changed = install_claude_mcp_config_at(Some(dir.path())).unwrap();
+        let changed = install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(!changed, "must not overwrite user-customised entry");
 
         let content = std::fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         // User's custom command survives.
-        assert_eq!(
-            json["mcpServers"]["sqz"]["command"],
-            "/custom/path/sqz-mcp"
-        );
+        assert_eq!(json["mcpServers"]["sqz"]["command"], "/custom/path/sqz-mcp");
         assert_eq!(
             json["mcpServers"]["sqz"]["args"],
             serde_json::json!(["--verbose"])
@@ -747,21 +754,17 @@ mod tests {
                 }
             }
         });
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&user_config).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&user_config).unwrap()).unwrap();
 
-        let (_, changed) =
-            remove_claude_mcp_config_at(Some(dir.path())).unwrap().unwrap();
+        let (_, changed) = remove_claude_mcp_config_at(Some(dir.path()))
+            .unwrap()
+            .unwrap();
         assert!(!changed, "must not remove user-customised entry");
 
         let content = std::fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(
-            json["mcpServers"]["sqz"]["command"],
-            "/custom/path/sqz-mcp",
+            json["mcpServers"]["sqz"]["command"], "/custom/path/sqz-mcp",
             "user's custom entry must survive uninstall"
         );
     }
@@ -778,15 +781,12 @@ mod tests {
                 }
             }
         });
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&existing).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
 
-        install_claude_mcp_config_at(Some(dir.path())).unwrap();
-        let (_, changed) =
-            remove_claude_mcp_config_at(Some(dir.path())).unwrap().unwrap();
+        install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
+        let (_, changed) = remove_claude_mcp_config_at(Some(dir.path()))
+            .unwrap()
+            .unwrap();
         assert!(changed);
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -807,7 +807,7 @@ mod tests {
         let path = dir.path().join(".claude.json");
         std::fs::write(&path, "").unwrap();
 
-        let changed = install_claude_mcp_config_at(Some(dir.path())).unwrap();
+        let changed = install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp").unwrap();
         assert!(changed);
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -821,7 +821,10 @@ mod tests {
         let path = dir.path().join(".claude.json");
         std::fs::write(&path, r#"["not", "an", "object"]"#).unwrap();
 
-        let result = install_claude_mcp_config_at(Some(dir.path()));
-        assert!(result.is_err(), "array root must be rejected — corrupted config");
+        let result = install_claude_mcp_config_at(Some(dir.path()), "sqz-mcp");
+        assert!(
+            result.is_err(),
+            "array root must be rejected — corrupted config"
+        );
     }
 }

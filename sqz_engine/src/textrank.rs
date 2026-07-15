@@ -8,7 +8,6 @@
 ///
 /// Convergence guarantee: Perron-Frobenius theorem ensures a unique
 /// stationary distribution for any connected graph with positive weights.
-
 use crate::error::Result;
 
 /// Configuration for TextRank compression.
@@ -65,10 +64,8 @@ pub fn textrank_compress(text: &str, config: &TextRankConfig) -> Result<TextRank
     }
 
     // Build word sets for each sentence
-    let word_sets: Vec<std::collections::HashSet<String>> = sentences
-        .iter()
-        .map(|s| tokenize_words(s))
-        .collect();
+    let word_sets: Vec<std::collections::HashSet<String>> =
+        sentences.iter().map(|s| tokenize_words(s)).collect();
 
     // Build similarity matrix
     let n = sentences.len();
@@ -82,7 +79,12 @@ pub fn textrank_compress(text: &str, config: &TextRankConfig) -> Result<TextRank
     }
 
     // Run PageRank iteration
-    let scores = pagerank(&sim_matrix, config.damping, config.max_iterations, config.epsilon);
+    let scores = pagerank(
+        &sim_matrix,
+        config.damping,
+        config.max_iterations,
+        config.epsilon,
+    );
 
     // Determine how many sentences to keep
     let keep_count = ((sentences.len() as f64 * config.keep_ratio).ceil() as usize)
@@ -226,20 +228,29 @@ mod tests {
 
     #[test]
     fn test_compresses_long_prose() {
-        let config = TextRankConfig { keep_ratio: 0.5, ..Default::default() };
+        let config = TextRankConfig {
+            keep_ratio: 0.5,
+            ..Default::default()
+        };
         let text = "The system architecture is modular. Each component operates independently. \
                     The database layer handles persistence. The API layer handles routing. \
                     Error handling is centralized. Logging is structured. \
                     The deployment pipeline is automated. Tests run on every commit.";
         let result = textrank_compress(text, &config).unwrap();
         assert!(result.sentences_dropped > 0, "should drop some sentences");
-        assert!(result.sentences_kept >= 2, "should keep at least min_sentences");
+        assert!(
+            result.sentences_kept >= 2,
+            "should keep at least min_sentences"
+        );
         assert!(result.text.len() < text.len(), "output should be shorter");
     }
 
     #[test]
     fn test_preserves_sentence_order() {
-        let config = TextRankConfig { keep_ratio: 0.6, ..Default::default() };
+        let config = TextRankConfig {
+            keep_ratio: 0.6,
+            ..Default::default()
+        };
         let text = "First sentence here. Second sentence here. Third sentence here. \
                     Fourth sentence here. Fifth sentence here.";
         let result = textrank_compress(text, &config).unwrap();
@@ -269,19 +280,26 @@ mod tests {
     #[test]
     fn test_word_overlap_similarity() {
         let a: std::collections::HashSet<String> = ["hello", "world", "test"]
-            .iter().map(|s| s.to_string()).collect();
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let b: std::collections::HashSet<String> = ["hello", "world", "other"]
-            .iter().map(|s| s.to_string()).collect();
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let sim = word_overlap_similarity(&a, &b);
-        assert!(sim > 0.0, "overlapping sets should have positive similarity");
+        assert!(
+            sim > 0.0,
+            "overlapping sets should have positive similarity"
+        );
     }
 
     #[test]
     fn test_word_overlap_disjoint() {
-        let a: std::collections::HashSet<String> = ["aaa", "bbb"]
-            .iter().map(|s| s.to_string()).collect();
-        let b: std::collections::HashSet<String> = ["ccc", "ddd"]
-            .iter().map(|s| s.to_string()).collect();
+        let a: std::collections::HashSet<String> =
+            ["aaa", "bbb"].iter().map(|s| s.to_string()).collect();
+        let b: std::collections::HashSet<String> =
+            ["ccc", "ddd"].iter().map(|s| s.to_string()).collect();
         assert_eq!(word_overlap_similarity(&a, &b), 0.0);
     }
 
@@ -317,7 +335,10 @@ mod tests {
                     Third important sentence here. Fourth important sentence here. \
                     Fifth important sentence here.";
         let result = textrank_compress(text, &config).unwrap();
-        assert!(result.sentences_kept >= 3, "should keep at least min_sentences");
+        assert!(
+            result.sentences_kept >= 3,
+            "should keep at least min_sentences"
+        );
     }
 
     use proptest::prelude::*;

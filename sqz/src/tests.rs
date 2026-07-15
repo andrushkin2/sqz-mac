@@ -7,8 +7,8 @@
 /// - SqzEngine::new() succeeds without network requests (Requirements 23.1, 16.1)
 #[cfg(test)]
 mod smoke_tests {
-    use sqz_engine::{AstParser, SqzEngine};
     use sqz_engine::preset::{Preset, PresetParser};
+    use sqz_engine::{AstParser, SqzEngine};
 
     /// Binary is operational: SqzEngine::new() succeeds.
     /// No network requests are made (offline operation, Requirement 23.1).
@@ -37,10 +37,7 @@ mod smoke_tests {
     fn test_18_plus_grammars_loaded() {
         let parser = AstParser::new();
         let count = parser.supported_languages().len();
-        assert!(
-            count >= 18,
-            "expected ≥18 supported languages, got {count}"
-        );
+        assert!(count >= 18, "expected ≥18 supported languages, got {count}");
     }
 
     /// Default preset is valid (passes PresetParser::validate).
@@ -73,7 +70,6 @@ mod smoke_tests {
 /// - Hook installation failure fallback (Requirement 1.5)
 /// - `sqz init` creates hooks and presets
 /// - CLI output interception end-to-end (Requirements 1.1, 1.4)
-
 #[cfg(test)]
 mod cli_proxy_tests {
     use crate::cli_proxy::CliProxy;
@@ -175,9 +171,8 @@ mod shell_hook_tests {
             "# sqz — context intelligence layer (auto-installed)",
         );
         // On a non-root test runner this should fail.
-        if result.is_err() {
+        if let Err(err) = result {
             // Expected: error is returned, not panicked.
-            let err = result.unwrap_err();
             assert!(err.to_string().contains("sqz hook installation failed"));
         }
         // If somehow it succeeds (running as root), that's also fine.
@@ -235,6 +230,10 @@ mod shell_hook_tests {
         .collect();
 
         let unique: std::collections::HashSet<_> = paths.iter().collect();
-        assert_eq!(unique.len(), paths.len(), "each shell must have a unique RC path");
+        assert_eq!(
+            unique.len(),
+            paths.len(),
+            "each shell must have a unique RC path"
+        );
     }
 }

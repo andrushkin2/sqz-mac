@@ -152,7 +152,7 @@ fn parse_minitest_summary(summary: &str) -> (usize, usize, usize, usize) {
     let mut skips = 0;
 
     for part in summary.split(',') {
-        let words: Vec<&str> = part.trim().split_whitespace().collect();
+        let words: Vec<&str> = part.split_whitespace().collect();
         if words.len() >= 2 {
             if let Ok(n) = words[0].parse::<usize>() {
                 match words[1] {

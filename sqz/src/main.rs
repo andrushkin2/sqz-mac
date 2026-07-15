@@ -5,9 +5,12 @@ mod vizit;
 
 use clap::{Parser, Subcommand};
 use sqz_engine::SqzEngine;
+use sqz_engine::{
+    CommandBreakdown, DashboardConfig, DashboardMetrics, DashboardServer, SessionHistoryEntry,
+    ToolBreakdown,
+};
 use sqz_engine::{EntropyAnalyzer, InfoLevel};
 use sqz_engine::{TeeManager, TeeMode};
-use sqz_engine::{DashboardConfig, DashboardMetrics, DashboardServer, CommandBreakdown, ToolBreakdown, SessionHistoryEntry};
 
 use cli_proxy::CliProxy;
 use shell_hook::ShellHook;
@@ -364,10 +367,19 @@ fn main() {
             }
         }
 
-        Some(Command::Init { yes, global, only, skip }) => cmd_init(yes, global, only, skip),
-        Some(Command::Compress { text, mode, verify, no_cache, cmd }) => {
-            cmd_compress(text, &mode, verify, no_cache, cmd)
-        }
+        Some(Command::Init {
+            yes,
+            global,
+            only,
+            skip,
+        }) => cmd_init(yes, global, only, skip),
+        Some(Command::Compress {
+            text,
+            mode,
+            verify,
+            no_cache,
+            cmd,
+        }) => cmd_compress(text, &mode, verify, no_cache, cmd),
         Some(Command::Expand { prefix }) => cmd_expand(&prefix),
         Some(Command::Export { session_id }) => cmd_export(&session_id),
         Some(Command::Import { file }) => cmd_import(&file),
@@ -378,17 +390,29 @@ fn main() {
         Some(Command::Dashboard { port }) => cmd_dashboard(port),
         Some(Command::Proxy { port }) => cmd_proxy(port),
         Some(Command::Uninstall { yes }) => cmd_uninstall(yes),
-        Some(Command::Stats { session_id, project, breakdown, json }) => cmd_stats(session_id, project, breakdown, json),
+        Some(Command::Stats {
+            session_id,
+            project,
+            breakdown,
+            json,
+        }) => cmd_stats(session_id, project, breakdown, json),
         Some(Command::Gain { days, project }) => cmd_gain(days, project),
         Some(Command::Discover { days }) => cmd_discover(days),
         Some(Command::Resume { session_id }) => cmd_resume(session_id),
         Some(Command::Hook { tool }) => cmd_hook(&tool),
         Some(Command::Compact) => cmd_compact(),
-        Some(Command::Reset { cache_only, stats_only, project, yes }) => {
-            cmd_reset(cache_only, stats_only, project, yes)
-        }
+        Some(Command::Reset {
+            cache_only,
+            stats_only,
+            project,
+            yes,
+        }) => cmd_reset(cache_only, stats_only, project, yes),
         Some(Command::PrintOpencodePlugin) => cmd_print_opencode_plugin(),
-        Some(Command::Vizit { refresh, db, no_color }) => cmd_vizit(refresh, db, no_color),
+        Some(Command::Vizit {
+            refresh,
+            db,
+            no_color,
+        }) => cmd_vizit(refresh, db, no_color),
     }
 }
 
@@ -458,13 +482,18 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
 
     // Shell hook
     let rc_exists = rc_path.exists();
-    let rc_has_hook = rc_exists && std::fs::read_to_string(&rc_path)
-        .map(|s| s.contains(hook.sentinel()))
-        .unwrap_or(false);
+    let rc_has_hook = rc_exists
+        && std::fs::read_to_string(&rc_path)
+            .map(|s| s.contains(hook.sentinel()))
+            .unwrap_or(false);
     if !rc_has_hook {
         plan.push((
             rc_path.display().to_string(),
-            if rc_exists { "append shell hook".to_string() } else { "create with shell hook".to_string() },
+            if rc_exists {
+                "append shell hook".to_string()
+            } else {
+                "create with shell hook".to_string()
+            },
             !rc_exists,
         ));
     }
@@ -484,8 +513,7 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
     // during the merge — surface it in the plan below and again after
     // install as a nudge.
     let opencode_existing = sqz_engine::find_opencode_config(&project_dir);
-    let opencode_jsonc_has_comments =
-        sqz_engine::opencode_config_has_comments(&project_dir);
+    let opencode_jsonc_has_comments = sqz_engine::opencode_config_has_comments(&project_dir);
     for config in &tool_configs {
         // Respect the --only/--skip filter from the CLI. Skipped tools
         // generate no plan line AND no file write — the user shouldn't
@@ -570,7 +598,8 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
             plan.push((
                 codex_toml.display().to_string(),
                 if codex_toml_exists {
-                    "Codex MCP registration (merge [mcp_servers.sqz] into existing config)".to_string()
+                    "Codex MCP registration (merge [mcp_servers.sqz] into existing config)"
+                        .to_string()
                 } else {
                     "Codex MCP registration (create user-level config.toml)".to_string()
                 },
@@ -659,7 +688,10 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
             }
         }
     } else {
-        println!("[sqz] ✓ shell hook already present in {}", rc_path.display());
+        println!(
+            "[sqz] ✓ shell hook already present in {}",
+            rc_path.display()
+        );
     }
 
     // Shell completions (silent, non-critical)
@@ -667,14 +699,23 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
 
     // Default preset
     if let Err(e) = std::fs::create_dir_all(&preset_dir) {
-        eprintln!("[sqz] ✗ warning: could not create preset dir {}: {e}", preset_dir.display());
+        eprintln!(
+            "[sqz] ✗ warning: could not create preset dir {}: {e}",
+            preset_dir.display()
+        );
     } else if !preset_path.exists() {
         match std::fs::write(&preset_path, DEFAULT_PRESET_TOML) {
-            Ok(()) => println!("[sqz] ✓ default preset written to {}", preset_path.display()),
+            Ok(()) => println!(
+                "[sqz] ✓ default preset written to {}",
+                preset_path.display()
+            ),
             Err(e) => eprintln!("[sqz] ✗ warning: could not write preset: {e}"),
         }
     } else {
-        println!("[sqz] ✓ default preset already exists at {}", preset_path.display());
+        println!(
+            "[sqz] ✓ default preset already exists at {}",
+            preset_path.display()
+        );
     }
 
     // AI tool hooks — merge/install runs after the user confirms.
@@ -712,7 +753,13 @@ fn cmd_init(skip_confirm: bool, global: bool, only: Option<String>, skip: Option
 /// and cmd.exe). Legacy `SQZ_CMD=NAME` env var is still honoured for
 /// backward compatibility with the POSIX shell hook scripts. `--cmd`
 /// wins if both are set.
-fn cmd_compress(text: Option<String>, mode: &str, show_verify: bool, no_cache: bool, cmd: Option<String>) {
+fn cmd_compress(
+    text: Option<String>,
+    mode: &str,
+    show_verify: bool,
+    no_cache: bool,
+    cmd: Option<String>,
+) {
     let is_stdin = text.is_none();
     let input = match text {
         Some(t) => t,
@@ -773,11 +820,10 @@ fn cmd_compress(text: Option<String>, mode: &str, show_verify: bool, no_cache: b
             eprintln!("[sqz] mode: aggressive (maximum reduction)");
             engine.compress_with_mode(&input, sqz_engine::CompressionMode::Aggressive)
         }
-        "default" => {
-            engine.compress_with_mode(&input, sqz_engine::CompressionMode::Default)
-        }
+        "default" => engine.compress_with_mode(&input, sqz_engine::CompressionMode::Default),
         _ => engine.compress(&input), // auto: confidence router decides
-    };    match result {
+    };
+    match result {
         Ok(c) => {
             print!("{}", c.data);
             let reduction = (1.0 - c.compression_ratio) * 100.0;
@@ -808,9 +854,7 @@ fn cmd_compress(text: Option<String>, mode: &str, show_verify: bool, no_cache: b
             } else {
                 eprintln!(
                     "[sqz] {}/{} tokens ({:.0}% reduction)",
-                    c.tokens_compressed,
-                    c.tokens_original,
-                    reduction,
+                    c.tokens_compressed, c.tokens_original, reduction,
                 );
             }
         }
@@ -884,7 +928,10 @@ fn cmd_expand(raw: &str) {
                 eprintln!("[sqz] expand: stdout write error: {e}");
                 std::process::exit(3);
             }
-            eprintln!("[sqz] expanded ref prefix '{prefix}' → {} bytes (full hash {hash})", bytes.len());
+            eprintln!(
+                "[sqz] expanded ref prefix '{prefix}' → {} bytes (full hash {hash})",
+                bytes.len()
+            );
         }
         Ok(Some(sqz_engine::ExpandResult::CompressedOnly { hash, compressed })) => {
             // Pre-migration cache entry — we only have the compressed
@@ -895,20 +942,12 @@ fn cmd_expand(raw: &str) {
             eprintln!(
                 "[sqz] expanded ref prefix '{prefix}' (compressed form only; full hash {hash})"
             );
-            eprintln!(
-                "[sqz] note: this cache entry predates the original-capture migration."
-            );
-            eprintln!(
-                "[sqz] to capture the true original bytes, re-run the command that produced"
-            );
-            eprintln!(
-                "[sqz] this ref with 'SQZ_NO_DEDUP=1' or '--no-cache'."
-            );
+            eprintln!("[sqz] note: this cache entry predates the original-capture migration.");
+            eprintln!("[sqz] to capture the true original bytes, re-run the command that produced");
+            eprintln!("[sqz] this ref with 'SQZ_NO_DEDUP=1' or '--no-cache'.");
         }
         Ok(None) => {
-            eprintln!(
-                "[sqz] expand: no cache entry matches prefix '{prefix}'."
-            );
+            eprintln!("[sqz] expand: no cache entry matches prefix '{prefix}'.");
             eprintln!("[sqz] hint: the ref may be from a different machine or a wiped ~/.sqz/sessions.db.");
             std::process::exit(1);
         }
@@ -949,7 +988,10 @@ fn cmd_status(json: bool) {
     // Also pull cumulative stats from the session store so the JSON
     // output includes historical savings — this is what the VS Code
     // extension status bar needs.
-    let cs = engine.session_store().compression_stats().unwrap_or_default();
+    let cs = engine
+        .session_store()
+        .compression_stats()
+        .unwrap_or_default();
 
     if json {
         let obj = serde_json::json!({
@@ -968,7 +1010,11 @@ fn cmd_status(json: bool) {
     }
 
     println!("agent:     {}", report.agent_id);
-    println!("consumed:  {} tokens ({:.1}%)", report.consumed, report.consumed_pct * 100.0);
+    println!(
+        "consumed:  {} tokens ({:.1}%)",
+        report.consumed,
+        report.consumed_pct * 100.0
+    );
     println!("pinned:    {} tokens", report.pinned);
     println!("available: {} tokens", report.available);
     println!("allocated: {} tokens", report.allocated);
@@ -1037,9 +1083,18 @@ fn cmd_analyze(file: Option<String>, high_pct: f64, low_pct: f64) {
         );
     }
 
-    let high_count = blocks.iter().filter(|b| b.info_level == InfoLevel::HighInfo).count();
-    let med_count = blocks.iter().filter(|b| b.info_level == InfoLevel::MediumInfo).count();
-    let low_count = blocks.iter().filter(|b| b.info_level == InfoLevel::LowInfo).count();
+    let high_count = blocks
+        .iter()
+        .filter(|b| b.info_level == InfoLevel::HighInfo)
+        .count();
+    let med_count = blocks
+        .iter()
+        .filter(|b| b.info_level == InfoLevel::MediumInfo)
+        .count();
+    let low_count = blocks
+        .iter()
+        .filter(|b| b.info_level == InfoLevel::LowInfo)
+        .count();
     println!(
         "\n[sqz] {} blocks total: {} HighInfo, {} MediumInfo, {} LowInfo",
         blocks.len(),
@@ -1055,35 +1110,31 @@ fn cmd_tee(action: Option<TeeAction>) {
     let mgr = TeeManager::with_default_dir(TeeMode::Never);
 
     match action {
-        None | Some(TeeAction::List) => {
-            match mgr.list() {
-                Ok(entries) if entries.is_empty() => {
-                    println!("[sqz] no saved tee entries");
-                }
-                Ok(entries) => {
-                    for e in &entries {
-                        println!(
-                            "{} | {} | exit {} | {} bytes",
-                            e.id, e.command, e.exit_code, e.size_bytes
-                        );
-                    }
-                    println!("\n[sqz] {} entries", entries.len());
-                }
-                Err(e) => {
-                    eprintln!("[sqz] tee list error: {e}");
-                    std::process::exit(1);
-                }
+        None | Some(TeeAction::List) => match mgr.list() {
+            Ok(entries) if entries.is_empty() => {
+                println!("[sqz] no saved tee entries");
             }
-        }
-        Some(TeeAction::Get { id }) => {
-            match mgr.get(&id) {
-                Ok(content) => print!("{content}"),
-                Err(e) => {
-                    eprintln!("[sqz] tee get error: {e}");
-                    std::process::exit(1);
+            Ok(entries) => {
+                for e in &entries {
+                    println!(
+                        "{} | {} | exit {} | {} bytes",
+                        e.id, e.command, e.exit_code, e.size_bytes
+                    );
                 }
+                println!("\n[sqz] {} entries", entries.len());
             }
-        }
+            Err(e) => {
+                eprintln!("[sqz] tee list error: {e}");
+                std::process::exit(1);
+            }
+        },
+        Some(TeeAction::Get { id }) => match mgr.get(&id) {
+            Ok(content) => print!("{content}"),
+            Err(e) => {
+                eprintln!("[sqz] tee get error: {e}");
+                std::process::exit(1);
+            }
+        },
     }
 }
 
@@ -1156,11 +1207,9 @@ fn cmd_dashboard(port: u16) {
                 // Session history.
                 if let Ok(sessions) = store.list_sessions(50) {
                     if let Ok(mut m) = metrics_handle.lock() {
-                        m.sessions = sessions.iter().map(|s| SessionHistoryEntry::from(s)).collect();
+                        m.sessions = sessions.iter().map(SessionHistoryEntry::from).collect();
                         // Auto-create synthetic dashboard session when metrics > 0.
-                        if m.tokens_saved > 0
-                            && !m.sessions.iter().any(|s| s.id == "dashboard")
-                        {
+                        if m.tokens_saved > 0 && !m.sessions.iter().any(|s| s.id == "dashboard") {
                             let _ = store.save_dashboard_session(
                                 "dashboard",
                                 "sqz dashboard session (auto-created)",
@@ -1222,7 +1271,8 @@ fn cmd_proxy(port: u16) {
                     Ok(r) => r,
                     Err(e) => {
                         let resp = sqz_engine::build_http_response(
-                            400, "Bad Request",
+                            400,
+                            "Bad Request",
                             &[("content-type", "text/plain")],
                             &format!("sqz proxy: {e}"),
                         );
@@ -1234,7 +1284,8 @@ fn cmd_proxy(port: u16) {
                 // Health check endpoint
                 if path == "/health" || path == "/" {
                     let resp = sqz_engine::build_http_response(
-                        200, "OK",
+                        200,
+                        "OK",
                         &[("content-type", "application/json")],
                         r#"{"status":"ok","service":"sqz-proxy"}"#,
                     );
@@ -1245,7 +1296,8 @@ fn cmd_proxy(port: u16) {
                 // Only handle POST requests to API endpoints
                 if method != "POST" {
                     let resp = sqz_engine::build_http_response(
-                        405, "Method Not Allowed",
+                        405,
+                        "Method Not Allowed",
                         &[("content-type", "text/plain")],
                         "sqz proxy: only POST is supported",
                     );
@@ -1258,7 +1310,8 @@ fn cmd_proxy(port: u16) {
                     Some(f) => f,
                     None => {
                         let resp = sqz_engine::build_http_response(
-                            404, "Not Found",
+                            404,
+                            "Not Found",
                             &[("content-type", "text/plain")],
                             &format!("sqz proxy: unknown API path: {path}"),
                         );
@@ -1268,15 +1321,16 @@ fn cmd_proxy(port: u16) {
                 };
 
                 // Compress the request body
-                let (compressed_body, stats) = match sqz_engine::compress_request(
-                    &body, format, &config, &engine,
-                ) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("[sqz] proxy: compression error: {e}, forwarding uncompressed");
-                        (body.clone(), sqz_engine::ProxyStats::default())
-                    }
-                };
+                let (compressed_body, stats) =
+                    match sqz_engine::compress_request(&body, format, &config, &engine) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!(
+                                "[sqz] proxy: compression error: {e}, forwarding uncompressed"
+                            );
+                            (body.clone(), sqz_engine::ProxyStats::default())
+                        }
+                    };
 
                 if stats.tokens_saved() > 0 {
                     eprintln!(
@@ -1315,8 +1369,12 @@ fn cmd_proxy(port: u16) {
 
                 let resp_body = serde_json::to_string_pretty(&response_json).unwrap_or_default();
                 let resp = sqz_engine::build_http_response(
-                    200, "OK",
-                    &[("content-type", "application/json"), ("x-sqz-tokens-saved", &stats.tokens_saved().to_string())],
+                    200,
+                    "OK",
+                    &[
+                        ("content-type", "application/json"),
+                        ("x-sqz-tokens-saved", &stats.tokens_saved().to_string()),
+                    ],
                     &resp_body,
                 );
                 let _ = client.write_all(&resp);
@@ -1340,9 +1398,10 @@ fn cmd_uninstall(skip_confirm: bool) {
 
     // Shell RC hook
     let rc_path = hook.rc_path();
-    let rc_has_hook = rc_path.exists() && std::fs::read_to_string(&rc_path)
-        .map(|s| s.contains(hook.sentinel()))
-        .unwrap_or(false);
+    let rc_has_hook = rc_path.exists()
+        && std::fs::read_to_string(&rc_path)
+            .map(|s| s.contains(hook.sentinel()))
+            .unwrap_or(false);
     if rc_has_hook {
         files_to_remove.push((rc_path.display().to_string(), true));
     }
@@ -1386,9 +1445,7 @@ fn cmd_uninstall(skip_confirm: bool) {
     // wiping the whole file — which would have destroyed user config
     // merged in at `sqz init` time.
     let opencode_config = sqz_engine::find_opencode_config(&project_dir);
-    let opencode_config_display = opencode_config
-        .as_ref()
-        .map(|p| p.display().to_string());
+    let opencode_config_display = opencode_config.as_ref().map(|p| p.display().to_string());
     if let Some(path) = &opencode_config_display {
         files_to_remove.push((format!("{path} (sqz entries only)"), true));
     }
@@ -1428,10 +1485,7 @@ fn cmd_uninstall(skip_confirm: bool) {
         .map(|p| p.exists())
         .unwrap_or(false);
     if let (Some(path), true) = (&claude_user_settings, claude_user_settings_exists) {
-        files_to_remove.push((
-            format!("{} (sqz hook entries only)", path.display()),
-            true,
-        ));
+        files_to_remove.push((format!("{} (sqz hook entries only)", path.display()), true));
     }
 
     // OpenCode user-level TypeScript plugin. Unlike the other tool
@@ -1510,19 +1564,13 @@ fn cmd_uninstall(skip_confirm: bool) {
                 // remove_sqz helper handles both paths; we just report
                 // what ended up on disk.
                 if path.exists() {
-                    println!(
-                        "[sqz] ✓ removed sqz entries from {}",
-                        path.display()
-                    );
+                    println!("[sqz] ✓ removed sqz entries from {}", path.display());
                 } else {
                     println!("[sqz] ✓ removed {}", path.display());
                 }
             }
             Ok(Some((path, false))) => {
-                println!(
-                    "[sqz] ✓ no sqz entries found in {}",
-                    path.display()
-                );
+                println!("[sqz] ✓ no sqz entries found in {}", path.display());
             }
             Ok(None) => {
                 // Shouldn't happen — we only enter this branch when
@@ -1565,10 +1613,7 @@ fn cmd_uninstall(skip_confirm: bool) {
             }
             Ok(None) => { /* path disappeared between discovery and now — fine */ }
             Err(e) => {
-                eprintln!(
-                    "[sqz] ✗ could not clean up {}: {e}",
-                    agents_md.display()
-                );
+                eprintln!("[sqz] ✗ could not clean up {}: {e}", agents_md.display());
             }
         }
     }
@@ -1579,10 +1624,7 @@ fn cmd_uninstall(skip_confirm: bool) {
         match sqz_engine::remove_codex_mcp_config() {
             Ok(Some((path, true))) => {
                 if path.exists() {
-                    println!(
-                        "[sqz] ✓ removed [mcp_servers.sqz] from {}",
-                        path.display()
-                    );
+                    println!("[sqz] ✓ removed [mcp_servers.sqz] from {}", path.display());
                 } else {
                     println!("[sqz] ✓ removed {}", path.display());
                 }
@@ -1595,10 +1637,7 @@ fn cmd_uninstall(skip_confirm: bool) {
             }
             Ok(None) => { /* file disappeared between discovery and now */ }
             Err(e) => {
-                eprintln!(
-                    "[sqz] ✗ could not clean up {}: {e}",
-                    codex_toml.display()
-                );
+                eprintln!("[sqz] ✗ could not clean up {}: {e}", codex_toml.display());
             }
         }
     }
@@ -1611,27 +1650,18 @@ fn cmd_uninstall(skip_confirm: bool) {
         match sqz_engine::remove_claude_global_hook() {
             Ok(Some((path, true))) => {
                 if path.exists() {
-                    println!(
-                        "[sqz] ✓ removed sqz hook entries from {}",
-                        path.display()
-                    );
+                    println!("[sqz] ✓ removed sqz hook entries from {}", path.display());
                 } else {
                     println!("[sqz] ✓ removed {}", path.display());
                 }
             }
             Ok(Some((path, false))) => {
-                println!(
-                    "[sqz] ✓ no sqz hook entries found in {}",
-                    path.display()
-                );
+                println!("[sqz] ✓ no sqz hook entries found in {}", path.display());
             }
             Ok(None) => { /* file didn't exist after all — skip */ }
             Err(e) => {
                 if let Some(path) = &claude_user_settings {
-                    eprintln!(
-                        "[sqz] ✗ could not clean up {}: {e}",
-                        path.display()
-                    );
+                    eprintln!("[sqz] ✗ could not clean up {}: {e}", path.display());
                 } else {
                     eprintln!("[sqz] ✗ could not resolve ~/.claude/settings.json: {e}");
                 }
@@ -1675,6 +1705,9 @@ mod colors {
     pub const YELLOW: &str = "\x1b[33m";
     pub const MAGENTA: &str = "\x1b[35m";
     pub const BLUE: &str = "\x1b[34m";
+    // Part of the palette for completeness/future use; not currently
+    // referenced by any output path.
+    #[allow(dead_code)]
     pub const WHITE: &str = "\x1b[97m";
 
     /// Returns true if color output is appropriate (TTY + no NO_COLOR).
@@ -1701,14 +1734,30 @@ mod colors {
         }
     }
 
-    pub fn bold(text: &str) -> String { paint(BOLD, text) }
-    pub fn cyan(text: &str) -> String { paint(CYAN, text) }
-    pub fn green(text: &str) -> String { paint(GREEN, text) }
-    pub fn bright_green(text: &str) -> String { paint(BRIGHT_GREEN, text) }
-    pub fn yellow(text: &str) -> String { paint(YELLOW, text) }
-    pub fn magenta(text: &str) -> String { paint(MAGENTA, text) }
-    pub fn dim(text: &str) -> String { paint(DIM, text) }
-    pub fn blue(text: &str) -> String { paint(BLUE, text) }
+    pub fn bold(text: &str) -> String {
+        paint(BOLD, text)
+    }
+    pub fn cyan(text: &str) -> String {
+        paint(CYAN, text)
+    }
+    pub fn green(text: &str) -> String {
+        paint(GREEN, text)
+    }
+    pub fn bright_green(text: &str) -> String {
+        paint(BRIGHT_GREEN, text)
+    }
+    pub fn yellow(text: &str) -> String {
+        paint(YELLOW, text)
+    }
+    pub fn magenta(text: &str) -> String {
+        paint(MAGENTA, text)
+    }
+    pub fn dim(text: &str) -> String {
+        paint(DIM, text)
+    }
+    pub fn blue(text: &str) -> String {
+        paint(BLUE, text)
+    }
 }
 
 /// `sqz stats [session-id]` — full compression stats report.
@@ -1719,11 +1768,18 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: boo
     if json {
         let project_dir = project.as_deref().map(resolve_project_filter);
         let cs = if let Some(ref dir) = project_dir {
-            engine.session_store().compression_stats_for_project(dir).unwrap_or_default()
+            engine
+                .session_store()
+                .compression_stats_for_project(dir)
+                .unwrap_or_default()
         } else {
-            engine.session_store().compression_stats().unwrap_or_default()
+            engine
+                .session_store()
+                .compression_stats()
+                .unwrap_or_default()
         };
-        let cache_entries = engine.session_store()
+        let cache_entries = engine
+            .session_store()
             .list_cache_entries_lru()
             .unwrap_or_default();
         let cache_size: u64 = cache_entries.iter().map(|(_, sz)| sz).sum();
@@ -1745,7 +1801,12 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: boo
     if project.as_deref() == Some("list") {
         let projects = engine.session_store().list_projects().unwrap_or_default();
         if projects.is_empty() {
-            println!("{}", colors::yellow("[sqz] No per-project data yet. New compressions will be tagged automatically."));
+            println!(
+                "{}",
+                colors::yellow(
+                    "[sqz] No per-project data yet. New compressions will be tagged automatically."
+                )
+            );
             return;
         }
         println!();
@@ -1787,28 +1848,61 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: boo
 
     // Cumulative compression stats (filtered or global)
     let cs = if let Some(ref dir) = project_dir {
-        engine.session_store().compression_stats_for_project(dir).unwrap_or_default()
+        engine
+            .session_store()
+            .compression_stats_for_project(dir)
+            .unwrap_or_default()
     } else {
-        engine.session_store().compression_stats().unwrap_or_default()
+        engine
+            .session_store()
+            .compression_stats()
+            .unwrap_or_default()
     };
 
     println!();
-    println!("  {}", colors::bold(&colors::cyan(&format!("📊 {}", title))));
+    println!(
+        "  {}",
+        colors::bold(&colors::cyan(&format!("📊 {}", title)))
+    );
     println!("  {}", colors::dim(&"─".repeat(50)));
     println!();
 
     // Big number: tokens saved
     let saved_str = format!("{}", cs.tokens_saved());
-    println!("  {}  {}", colors::bright_green(&saved_str), colors::bold("tokens saved"));
-    println!("  {}  {:.1}% average reduction", colors::green("↓"), cs.reduction_pct());
+    println!(
+        "  {}  {}",
+        colors::bright_green(&saved_str),
+        colors::bold("tokens saved")
+    );
+    println!(
+        "  {}  {:.1}% average reduction",
+        colors::green("↓"),
+        cs.reduction_pct()
+    );
     println!();
 
     // Stats table
-    println!("  {:<22} {}", colors::dim("Compressions"), colors::bold(&format!("{}", cs.total_compressions)));
-    println!("  {:<22} {}", colors::dim("Tokens in"), format!("{}", cs.total_tokens_in));
-    println!("  {:<22} {}", colors::dim("Tokens out"), format!("{}", cs.total_tokens_out));
-    println!("  {:<22} {}", colors::dim("Tokens saved"), colors::green(&format!("{}", cs.tokens_saved())));
-    println!("  {:<22} {}", colors::dim("Avg reduction"), colors::bright_green(&format!("{:.1}%", cs.reduction_pct())));
+    println!(
+        "  {:<22} {}",
+        colors::dim("Compressions"),
+        colors::bold(&format!("{}", cs.total_compressions))
+    );
+    println!("  {:<22} {}", colors::dim("Tokens in"), cs.total_tokens_in);
+    println!(
+        "  {:<22} {}",
+        colors::dim("Tokens out"),
+        cs.total_tokens_out
+    );
+    println!(
+        "  {:<22} {}",
+        colors::dim("Tokens saved"),
+        colors::green(&format!("{}", cs.tokens_saved()))
+    );
+    println!(
+        "  {:<22} {}",
+        colors::dim("Avg reduction"),
+        colors::bright_green(&format!("{:.1}%", cs.reduction_pct()))
+    );
 
     if let Some(ref dir) = project_dir {
         println!("  {:<22} {}", colors::dim("Project"), colors::magenta(dir));
@@ -1822,47 +1916,79 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: boo
                 println!("  {}", colors::bold(&colors::cyan("💰 Session Cost")));
                 println!("  {}", colors::dim(&"─".repeat(50)));
                 println!("  {:<22} {}", colors::dim("Session"), colors::magenta(sid));
-                println!("  {:<22} {}", colors::dim("Total tokens"), format!("{}", cost.total_tokens));
-                println!("  {:<22} {}", colors::dim("Total cost"), colors::yellow(&format!("${:.6}", cost.total_usd)));
-                println!("  {:<22} {}", colors::dim("Cache savings"), colors::green(&format!("${:.6}", cost.cache_savings_usd)));
-                println!("  {:<22} {}", colors::dim("Compression savings"), colors::green(&format!("${:.6}", cost.compression_savings_usd)));
+                println!(
+                    "  {:<22} {}",
+                    colors::dim("Total tokens"),
+                    cost.total_tokens
+                );
+                println!(
+                    "  {:<22} {}",
+                    colors::dim("Total cost"),
+                    colors::yellow(&format!("${:.6}", cost.total_usd))
+                );
+                println!(
+                    "  {:<22} {}",
+                    colors::dim("Cache savings"),
+                    colors::green(&format!("${:.6}", cost.cache_savings_usd))
+                );
+                println!(
+                    "  {:<22} {}",
+                    colors::dim("Compression savings"),
+                    colors::green(&format!("${:.6}", cost.compression_savings_usd))
+                );
                 if cost.total_usd > 0.0 {
-                    let pct = (cost.compression_savings_usd / (cost.total_usd + cost.compression_savings_usd)) * 100.0;
-                    println!("  {:<22} {}", colors::dim("Effective reduction"), colors::bright_green(&format!("{:.1}%", pct)));
+                    let pct = (cost.compression_savings_usd
+                        / (cost.total_usd + cost.compression_savings_usd))
+                        * 100.0;
+                    println!(
+                        "  {:<22} {}",
+                        colors::dim("Effective reduction"),
+                        colors::bright_green(&format!("{:.1}%", pct))
+                    );
                 }
             }
             Err(e) => {
                 println!();
                 println!("  {:<22} {}", colors::dim("Session"), sid);
-                println!("  {:<22} {}", colors::dim("Error"), format!("{e}"));
+                println!("  {:<22} {}", colors::dim("Error"), e);
             }
         }
     }
 
     // Cache stats (global only — cache is shared across projects)
     if project_dir.is_none() {
-        let cache_entries = engine.session_store()
+        let cache_entries = engine
+            .session_store()
             .list_cache_entries_lru()
             .unwrap_or_default();
         let cache_size: u64 = cache_entries.iter().map(|(_, sz)| sz).sum();
         println!();
         println!("  {}", colors::bold(&colors::cyan("🗄️  Cache")));
         println!("  {}", colors::dim(&"─".repeat(50)));
-        println!("  {:<22} {}", colors::dim("Entries"), format!("{}", cache_entries.len()));
+        println!("  {:<22} {}", colors::dim("Entries"), cache_entries.len());
         println!("  {:<22} {}", colors::dim("Size"), format_bytes(cache_size));
     }
 
     // Per-command breakdown
     if breakdown {
         let cmds = if let Some(ref dir) = project_dir {
-            engine.session_store().command_breakdown_for_project(15, dir).unwrap_or_default()
+            engine
+                .session_store()
+                .command_breakdown_for_project(15, dir)
+                .unwrap_or_default()
         } else {
-            engine.session_store().command_breakdown(15).unwrap_or_default()
+            engine
+                .session_store()
+                .command_breakdown(15)
+                .unwrap_or_default()
         };
 
         if !cmds.is_empty() {
             println!();
-            println!("  {}", colors::bold(&colors::cyan("🔍 Top Token Consumers")));
+            println!(
+                "  {}",
+                colors::bold(&colors::cyan("🔍 Top Token Consumers"))
+            );
             println!("  {}", colors::dim(&"─".repeat(70)));
             println!(
                 "  {:<20} {:>6} {:>10} {:>10} {:>8}",
@@ -1891,16 +2017,12 @@ fn cmd_stats(session_id: Option<String>, project: Option<String>, breakdown: boo
                 let cmd_colored = colors::magenta(&cmd_display);
                 // Pad to 20 visible chars (accounting for ANSI codes)
                 let visible_len = cmd_display.len();
-                let pad_needed = if visible_len < 20 { 20 - visible_len } else { 0 };
+                let pad_needed = 20_usize.saturating_sub(visible_len);
                 let padded_cmd = format!("{}{}", cmd_colored, " ".repeat(pad_needed));
 
                 println!(
                     "  {} {:>6} {:>10} {:>10} {:>8}",
-                    padded_cmd,
-                    c.invocations,
-                    c.tokens_in,
-                    c.tokens_out,
-                    pct_colored,
+                    padded_cmd, c.invocations, c.tokens_in, c.tokens_out, pct_colored,
                 );
             }
             println!("  {}", colors::dim(&"─".repeat(70)));
@@ -1916,14 +2038,23 @@ fn cmd_gain(days: u32, project: Option<String>) {
     let project_dir = project.as_deref().map(resolve_project_filter);
 
     let gains = if let Some(ref dir) = project_dir {
-        engine.session_store().daily_gains_for_project(days, dir).unwrap_or_default()
+        engine
+            .session_store()
+            .daily_gains_for_project(days, dir)
+            .unwrap_or_default()
     } else {
         engine.session_store().daily_gains(days).unwrap_or_default()
     };
     let stats = if let Some(ref dir) = project_dir {
-        engine.session_store().compression_stats_for_project(dir).unwrap_or_default()
+        engine
+            .session_store()
+            .compression_stats_for_project(dir)
+            .unwrap_or_default()
     } else {
-        engine.session_store().compression_stats().unwrap_or_default()
+        engine
+            .session_store()
+            .compression_stats()
+            .unwrap_or_default()
     };
 
     if gains.is_empty() {
@@ -1952,14 +2083,27 @@ fn cmd_gain(days: u32, project: Option<String>) {
                 );
             }
         } else if project_dir.is_some() {
-            println!("{}", colors::yellow("[sqz] No compression data for this project yet."));
+            println!(
+                "{}",
+                colors::yellow("[sqz] No compression data for this project yet.")
+            );
         } else {
-            println!("{}", colors::yellow("[sqz] No compression data yet. Run `sqz compress` to start tracking."));
+            println!(
+                "{}",
+                colors::yellow(
+                    "[sqz] No compression data yet. Run `sqz compress` to start tracking."
+                )
+            );
         }
         return;
     }
 
-    let max_saved = gains.iter().map(|g| g.tokens_saved).max().unwrap_or(1).max(1);
+    let max_saved = gains
+        .iter()
+        .map(|g| g.tokens_saved)
+        .max()
+        .unwrap_or(1)
+        .max(1);
     let bar_width: u64 = 30;
 
     let header = if let Some(ref dir) = project_dir {
@@ -2002,7 +2146,7 @@ fn cmd_gain(days: u32, project: Option<String>) {
 
         println!(
             "  {} │{}{}│ {} saved",
-            colors::dim(&g.date[5..].to_string()),
+            colors::dim(&g.date[5..]),
             colored_bar,
             pad,
             saved_str,
@@ -2057,7 +2201,10 @@ fn cmd_discover(days: u32) {
         }
     };
 
-    println!("sqz discover — missed savings analysis (last {} days)", days);
+    println!(
+        "sqz discover — missed savings analysis (last {} days)",
+        days
+    );
     println!("{}", "─".repeat(50));
 
     if stats.total_compressions == 0 {
@@ -2081,7 +2228,10 @@ fn cmd_discover(days: u32) {
     println!("  Compressions:    {}", stats.total_compressions);
     println!("  Tokens original: {}", total_original);
     println!("  Tokens after:    {}", total_compressed);
-    println!("  Tokens saved:    {} ({:.1}% avg reduction)", total_saved, avg_reduction);
+    println!(
+        "  Tokens saved:    {} ({:.1}% avg reduction)",
+        total_saved, avg_reduction
+    );
     println!();
 
     // Estimate what could be saved with better adoption
@@ -2187,14 +2337,15 @@ fn cmd_resume(session_id: Option<String>) {
         ));
     }
 
-    let snapshot = Snapshot {
-        events,
-    };
+    let snapshot = Snapshot { events };
 
     let guide = continuity.generate_guide(&snapshot);
 
     println!("{}", guide.text);
-    eprintln!("[sqz] session guide: {} tokens from session '{}'", guide.token_count, sid);
+    eprintln!(
+        "[sqz] session guide: {} tokens from session '{}'",
+        guide.token_count, sid
+    );
 }
 
 // ── Compact command ───────────────────────────────────────────────────────
@@ -2223,7 +2374,7 @@ fn cmd_compact() {
             content: format!("[cached content, {} bytes]", size),
             last_accessed_turn: current_turn.saturating_sub(cache_entries.len() as u64 - i as u64),
             access_count: 1,
-            tokens: (*size as u32 + 3) / 4,
+            tokens: (*size as u32).div_ceil(4),
             pinned: false,
         })
         .collect();
@@ -2358,7 +2509,7 @@ fn cmd_vizit(refresh_secs: u64, db_path: Option<std::path::PathBuf>, no_color: b
     }
 
     // Validate refresh_secs range
-    if refresh_secs < 1 || refresh_secs > 60 {
+    if !(1..=60).contains(&refresh_secs) {
         eprintln!("[sqz vizit] --refresh must be between 1 and 60, got {refresh_secs}");
         std::process::exit(1);
     }
@@ -2428,14 +2579,24 @@ fn cmd_hook(tool: &str) {
         return;
     }
 
+    // Resolve the exact path this process was invoked with, so the
+    // rewritten `... | <sqz> compress --cmd ...` pipe doesn't silently
+    // depend on `sqz` being on PATH. Hooks are launched directly by the
+    // AI tool (not through the user's login shell), so PATH lookups
+    // there are not guaranteed. Falls back to the bare "sqz" if the
+    // running binary's path can't be resolved.
+    let sqz_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| "sqz".to_string());
+
     let result = match tool {
-        "opencode" => sqz_engine::process_opencode_hook(&input),
-        "cursor" => sqz_engine::process_hook_cursor(&input),
-        "gemini" => sqz_engine::process_hook_gemini(&input),
-        "windsurf" => sqz_engine::process_hook_windsurf(&input),
-        "kiro" => sqz_engine::process_hook_kiro(&input),
+        "opencode" => sqz_engine::process_opencode_hook_with_cmd(&input, &sqz_path),
+        "cursor" => sqz_engine::process_hook_cursor_with_cmd(&input, &sqz_path),
+        "gemini" => sqz_engine::process_hook_gemini_with_cmd(&input, &sqz_path),
+        "windsurf" => sqz_engine::process_hook_windsurf_with_cmd(&input, &sqz_path),
+        "kiro" => sqz_engine::process_hook_kiro_with_cmd(&input, &sqz_path),
         // "claude" and any other tool use the default Claude Code format
-        _ => sqz_engine::process_hook(&input),
+        _ => sqz_engine::process_hook_with_cmd(&input, &sqz_path),
     };
 
     match result {
@@ -2474,7 +2635,10 @@ fn install_completions(hook: &ShellHook) {
 
     let (dest, content): (std::path::PathBuf, &str) = match hook {
         ShellHook::Fish => (
-            home.join(".config").join("fish").join("completions").join("sqz.fish"),
+            home.join(".config")
+                .join("fish")
+                .join("completions")
+                .join("sqz.fish"),
             include_str!("../completions/sqz.fish"),
         ),
         ShellHook::Zsh => (
@@ -2482,11 +2646,18 @@ fn install_completions(hook: &ShellHook) {
             include_str!("../completions/sqz.zsh"),
         ),
         ShellHook::Bash => (
-            home.join(".local").join("share").join("bash-completion").join("completions").join("sqz"),
+            home.join(".local")
+                .join("share")
+                .join("bash-completion")
+                .join("completions")
+                .join("sqz"),
             include_str!("../completions/sqz.bash"),
         ),
         ShellHook::Nushell => (
-            home.join(".config").join("nushell").join("completions").join("sqz.nu"),
+            home.join(".config")
+                .join("nushell")
+                .join("completions")
+                .join("sqz.nu"),
             include_str!("../completions/sqz.nu"),
         ),
     };
@@ -2497,9 +2668,9 @@ fn install_completions(hook: &ShellHook) {
         }
     }
 
-    match std::fs::write(&dest, content) {
-        Ok(()) => println!("[sqz] completions installed to {}", dest.display()),
-        Err(_) => {} // silently skip — completions are optional
+    // Silently skip on error — completions are optional.
+    if std::fs::write(&dest, content).is_ok() {
+        println!("[sqz] completions installed to {}", dest.display());
     }
 }
 

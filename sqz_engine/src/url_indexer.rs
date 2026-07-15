@@ -177,7 +177,6 @@ fn collapse_blank_lines(s: &str) -> String {
     result.trim().to_string()
 }
 
-
 // ── Chunking by headings ──────────────────────────────────────────────────────
 
 /// A chunk is a heading + the body text until the next heading of equal or
@@ -376,18 +375,13 @@ impl UrlIndexer {
 
     fn delete_url(&self, url: &str) -> Result<()> {
         // Delete chunks (triggers will clean FTS)
-        self.db.execute(
-            "DELETE FROM url_chunks WHERE url = ?1",
-            params![url],
-        )?;
-        self.db.execute(
-            "DELETE FROM url_cache WHERE url = ?1",
-            params![url],
-        )?;
+        self.db
+            .execute("DELETE FROM url_chunks WHERE url = ?1", params![url])?;
+        self.db
+            .execute("DELETE FROM url_cache WHERE url = ?1", params![url])?;
         Ok(())
     }
 }
-
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -444,7 +438,8 @@ mod tests {
 
     #[test]
     fn test_html_to_markdown_strips_script_and_style() {
-        let html = "<p>visible</p><script>alert('x')</script><style>.a{}</style><p>also visible</p>";
+        let html =
+            "<p>visible</p><script>alert('x')</script><style>.a{}</style><p>also visible</p>";
         let md = html_to_markdown(html);
         assert!(md.contains("visible"));
         assert!(md.contains("also visible"));
@@ -600,8 +595,9 @@ mod tests {
         assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.heading == "Authentication"));
         // The overview section should NOT match "authentication"
-        assert!(results.iter().all(|r| r.heading != "Overview"
-            || r.body.to_lowercase().contains("authentication")));
+        assert!(results
+            .iter()
+            .all(|r| r.heading != "Overview" || r.body.to_lowercase().contains("authentication")));
     }
 
     #[test]

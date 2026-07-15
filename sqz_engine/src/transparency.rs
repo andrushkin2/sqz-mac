@@ -23,28 +23,28 @@ pub struct CompressionAnnotation {
 impl CompressionAnnotation {
     /// Build an annotation from a CompressedContent result.
     pub fn from_result(result: &CompressedContent) -> Self {
-        let confidence = result
-            .verify
-            .as_ref()
-            .map(|v| v.confidence)
-            .unwrap_or(1.0);
+        let confidence = result.verify.as_ref().map(|v| v.confidence).unwrap_or(1.0);
 
-        let safe_mode = result
-            .provenance
-            .label
-            .as_deref()
-            == Some("safe-fallback");
+        let safe_mode = result.provenance.label.as_deref() == Some("safe-fallback");
 
         let nulls_stripped = if result.stages_applied.iter().any(|s| s == "strip_nulls") {
             // Estimate from compression ratio on JSON
-            let diff = result.tokens_original.saturating_sub(result.tokens_compressed);
+            let diff = result
+                .tokens_original
+                .saturating_sub(result.tokens_compressed);
             (diff as f64 * 0.3) as u32 // rough estimate: ~30% of savings from nulls
         } else {
             0
         };
 
-        let lines_condensed = if result.stages_applied.iter().any(|s| s == "condense" || s == "rle") {
-            let diff = result.tokens_original.saturating_sub(result.tokens_compressed);
+        let lines_condensed = if result
+            .stages_applied
+            .iter()
+            .any(|s| s == "condense" || s == "rle")
+        {
+            let diff = result
+                .tokens_original
+                .saturating_sub(result.tokens_compressed);
             (diff as f64 * 0.4) as u32
         } else {
             0
@@ -67,8 +67,7 @@ impl CompressionAnnotation {
     /// Example: `[sqz: 847→312 tokens | stripped: 12 nulls | condensed: 8 lines | confidence: 0.97 ✓]`
     pub fn format_inline(&self) -> String {
         let pct = if self.tokens_original > 0 {
-            ((self.tokens_original - self.tokens_compressed) as f64
-                / self.tokens_original as f64
+            ((self.tokens_original - self.tokens_compressed) as f64 / self.tokens_original as f64
                 * 100.0) as u32
         } else {
             0
@@ -109,7 +108,12 @@ impl CompressionAnnotation {
             "⚠"
         };
 
-        format!("[sqz: {} | confidence: {:.2} {}]", parts.join(" | "), self.confidence, check)
+        format!(
+            "[sqz: {} | confidence: {:.2} {}]",
+            parts.join(" | "),
+            self.confidence,
+            check
+        )
     }
 }
 

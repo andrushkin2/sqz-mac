@@ -7,7 +7,6 @@
 ///
 /// Based on rate-distortion theory: the optimal cutoff depends on the
 /// information density of the content being truncated, not a fixed length.
-
 use crate::error::Result;
 
 /// Configuration for entropy-weighted truncation.
@@ -123,10 +122,7 @@ impl EntropyTruncator {
         let total = scored.len();
 
         for seg in &mut scored {
-            if seg.text.len() < self.config.min_segment_length {
-                seg.kept = true;
-                kept_count += 1;
-            } else if seg.entropy >= threshold {
+            if seg.text.len() < self.config.min_segment_length || seg.entropy >= threshold {
                 seg.kept = true;
                 kept_count += 1;
             } else {
@@ -143,7 +139,8 @@ impl EntropyTruncator {
                 .filter(|(_, s)| !s.kept)
                 .map(|(i, s)| (i, s.entropy))
                 .collect();
-            dropped_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            dropped_indices
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
             for (idx, _) in dropped_indices {
                 if kept_count >= self.config.min_kept_segments {
@@ -180,7 +177,10 @@ impl EntropyTruncator {
 
     /// Truncate a JSON array by keeping high-entropy elements and dropping
     /// low-entropy (redundant) ones.
-    pub fn truncate_array(&self, elements: &[serde_json::Value]) -> Result<EntropyTruncArrayResult> {
+    pub fn truncate_array(
+        &self,
+        elements: &[serde_json::Value],
+    ) -> Result<EntropyTruncArrayResult> {
         if elements.len() <= 2 {
             return Ok(EntropyTruncArrayResult {
                 kept: elements.to_vec(),
@@ -202,7 +202,10 @@ impl EntropyTruncator {
         // Compute median entropy
         let mut entropies: Vec<f64> = scored.iter().map(|(_, e)| *e).collect();
         entropies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let threshold = self.config.min_entropy_override.unwrap_or_else(|| median(&entropies));
+        let threshold = self
+            .config
+            .min_entropy_override
+            .unwrap_or_else(|| median(&entropies));
 
         // Keep elements above threshold, plus at least min_kept_segments
         let mut kept = Vec::new();
@@ -219,10 +222,8 @@ impl EntropyTruncator {
         // Always keep at least min_kept_segments
         while kept.len() < self.config.min_kept_segments && dropped > 0 {
             // Add back highest-entropy dropped elements
-            let mut remaining: Vec<&(serde_json::Value, f64)> = scored
-                .iter()
-                .filter(|(e, _)| !kept.contains(e))
-                .collect();
+            let mut remaining: Vec<&(serde_json::Value, f64)> =
+                scored.iter().filter(|(e, _)| !kept.contains(e)).collect();
             remaining.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((elem, _)) = remaining.first() {
                 kept.push((*elem).clone());
@@ -294,7 +295,7 @@ fn median(sorted: &[f64]) -> f64 {
         return 0.0;
     }
     let mid = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
+    if sorted.len().is_multiple_of(2) {
         (sorted[mid - 1] + sorted[mid]) / 2.0
     } else {
         sorted[mid]
@@ -380,8 +381,10 @@ mod tests {
     fn test_truncate_string_with_paragraphs() {
         let trunc = EntropyTruncator::new();
         // Create text with varied and repetitive paragraphs
-        let varied = "The quick brown fox jumps over the lazy dog with many different words and characters.";
-        let repetitive = "aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa";
+        let varied =
+            "The quick brown fox jumps over the lazy dog with many different words and characters.";
+        let repetitive =
+            "aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa";
         let text = format!("{varied}\n\n{repetitive}\n\n{varied}");
 
         let result = trunc.truncate_string(&text).unwrap();
@@ -392,10 +395,7 @@ mod tests {
     #[test]
     fn test_truncate_array_short() {
         let trunc = EntropyTruncator::new();
-        let elements = vec![
-            serde_json::json!(1),
-            serde_json::json!(2),
-        ];
+        let elements = vec![serde_json::json!(1), serde_json::json!(2)];
         let result = trunc.truncate_array(&elements).unwrap();
         assert_eq!(result.kept.len(), 2);
         assert_eq!(result.dropped_count, 0);

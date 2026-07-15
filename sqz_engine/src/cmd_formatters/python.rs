@@ -1,7 +1,13 @@
 use super::truncate::{CAP_ERRORS, CAP_WARNINGS};
 
 pub fn format_python(cmd: &str, subcmd: Option<&str>, output: &str) -> Option<String> {
-    let base = cmd.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("");
+    let base = cmd
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
 
     match base {
         "pytest" => Some(super::test_output::format_test_failures(output)),
@@ -29,16 +35,24 @@ fn format_ruff(subcmd: Option<&str>, output: &str) -> String {
     }
 
     // Human-readable: "file.py:10:5: E501 Line too long"
-    let mut by_file: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     let mut total = 0;
 
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         // Pattern: "path:line:col: CODE message"
         if let Some(colon1) = trimmed.find(':') {
             let after = &trimmed[colon1 + 1..];
-            if after.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            if after
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 let file = trimmed[..colon1].to_string();
                 by_file.entry(file).or_default().push(trimmed.to_string());
                 total += 1;
@@ -56,7 +70,9 @@ fn format_ruff(subcmd: Option<&str>, output: &str) -> String {
     let mut result = format!("{} issues in {} files:\n", total, by_file.len());
     let mut shown = 0;
     for (file, issues) in &by_file {
-        if shown >= CAP_ERRORS { break; }
+        if shown >= CAP_ERRORS {
+            break;
+        }
         result.push_str(&format!("  {} ({}):\n", file, issues.len()));
         for issue in issues.iter().take(5) {
             result.push_str(&format!("    {}\n", issue));
@@ -91,13 +107,17 @@ fn format_ruff_json(diagnostics: &[serde_json::Value]) -> String {
         result.push_str(&format!("  {} ({}x)\n", code, count));
     }
     if sorted.len() > CAP_WARNINGS {
-        result.push_str(&format!("  ...+{} more rules\n", sorted.len() - CAP_WARNINGS));
+        result.push_str(&format!(
+            "  ...+{} more rules\n",
+            sorted.len() - CAP_WARNINGS
+        ));
     }
     result.trim().to_string()
 }
 
 fn format_ruff_format(output: &str) -> String {
-    let changed: Vec<&str> = output.lines()
+    let changed: Vec<&str> = output
+        .lines()
         .filter(|l| !l.trim().is_empty() && !l.contains("file") && !l.contains("left unchanged"))
         .collect();
 
@@ -112,7 +132,8 @@ fn format_ruff_format(output: &str) -> String {
 }
 
 fn format_mypy(output: &str) -> String {
-    let mut by_code: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_code: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     let mut total = 0;
 
     for line in output.lines() {
@@ -134,7 +155,10 @@ fn format_mypy(output: &str) -> String {
     }
 
     // Check for summary line
-    if let Some(summary) = output.lines().find(|l| l.contains("Found") && l.contains("error")) {
+    if let Some(summary) = output
+        .lines()
+        .find(|l| l.contains("Found") && l.contains("error"))
+    {
         if total == 0 {
             return summary.trim().to_string();
         }
@@ -146,7 +170,7 @@ fn format_mypy(output: &str) -> String {
 
     let mut result = format!("mypy: {} errors\n", total);
     let mut sorted: Vec<_> = by_code.iter().collect();
-    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
     for (code, locations) in sorted.iter().take(CAP_WARNINGS) {
         result.push_str(&format!("  [{}] ({}x)\n", code, locations.len()));
         for loc in locations.iter().take(3) {
@@ -171,13 +195,18 @@ fn format_pip_install(output: &str) -> String {
     // Keep only "Successfully installed" or "Requirement already satisfied" summary
     for line in output.lines().rev() {
         if line.starts_with("Successfully installed") {
-            let packages: Vec<&str> = line.strip_prefix("Successfully installed ")
+            let packages: Vec<&str> = line
+                .strip_prefix("Successfully installed ")
                 .unwrap_or(line)
                 .split_whitespace()
                 .collect();
             if packages.len() > 10 {
-                return format!("installed {} packages: {}, ...+{}", packages.len(),
-                    packages[..5].join(", "), packages.len() - 5);
+                return format!(
+                    "installed {} packages: {}, ...+{}",
+                    packages.len(),
+                    packages[..5].join(", "),
+                    packages.len() - 5
+                );
             }
             return line.to_string();
         }
@@ -193,10 +222,12 @@ fn format_pip_list(output: &str) -> String {
     if lines.len() <= 30 {
         return output.to_string();
     }
-    format!("{} packages installed\n{}\n...+{} more",
-        lines.len() - 2,  // subtract header lines
+    format!(
+        "{} packages installed\n{}\n...+{} more",
+        lines.len() - 2, // subtract header lines
         lines[..12].join("\n"),
-        lines.len() - 12)
+        lines.len() - 12
+    )
 }
 
 #[cfg(test)]

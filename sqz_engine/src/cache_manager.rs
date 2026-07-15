@@ -36,7 +36,12 @@ pub enum CacheResult {
         similarity: f64,
     },
     /// Content not seen before — full compression result.
-    Fresh { output: CompressedContent },
+    Fresh {
+        /// Boxed so `Fresh`'s size doesn't force the whole enum to be as
+        /// large as `CompressedContent` even when a much smaller `Dedup`
+        /// or `Delta` variant is the common case.
+        output: Box<CompressedContent>,
+    },
 }
 
 /// Result of resolving a dedup-ref prefix via
@@ -285,7 +290,10 @@ impl CacheManager {
                 let inline_ref = format!("§ref:{hash_prefix}§");
                 // Update the sent timestamp
                 self.record_ref_sent(&hash);
-                let _ = self.store.record_cache_hit().map_err(|e| eprintln!("[sqz] cache hit record error: {e}"));
+                let _ = self
+                    .store
+                    .record_cache_hit()
+                    .map_err(|e| eprintln!("[sqz] cache hit record error: {e}"));
                 return Ok(CacheResult::Dedup {
                     inline_ref,
                     token_cost: 13,
@@ -293,22 +301,31 @@ impl CacheManager {
             } else {
                 // Ref is stale — re-send the full compressed content.
                 // The original may have been compacted out of the LLM's context.
-                let _ = self.store.record_cache_hit().map_err(|e| eprintln!("[sqz] cache stale-hit record error: {e}"));
+                let _ = self
+                    .store
+                    .record_cache_hit()
+                    .map_err(|e| eprintln!("[sqz] cache stale-hit record error: {e}"));
                 let text = String::from_utf8_lossy(content).into_owned();
                 let ctx = SessionContext {
                     session_id: "cache".to_string(),
                 };
                 let preset = Preset::default();
-                let compressed = pipeline.compress(&text, &ctx, &preset, CompressionMode::Default)?;
+                let compressed =
+                    pipeline.compress(&text, &ctx, &preset, CompressionMode::Default)?;
                 // Record that we re-sent this content
                 self.record_ref_sent(&hash);
-                return Ok(CacheResult::Fresh { output: compressed });
+                return Ok(CacheResult::Fresh {
+                    output: Box::new(compressed),
+                });
             }
         }
 
         // Near-duplicate check: compare against recent cache entries
         let text = String::from_utf8_lossy(content).into_owned();
-        let _ = self.store.record_cache_miss().map_err(|e| eprintln!("[sqz] cache miss record error: {e}"));
+        let _ = self
+            .store
+            .record_cache_miss()
+            .map_err(|e| eprintln!("[sqz] cache miss record error: {e}"));
         if let Some(delta_result) = self.try_delta_encode(&text)? {
             // Store the new content in cache for future exact matches
             let ctx = SessionContext {
@@ -339,7 +356,9 @@ impl CacheManager {
         // Record that this content was sent at the current turn
         self.record_ref_sent(&hash);
 
-        Ok(CacheResult::Fresh { output: compressed })
+        Ok(CacheResult::Fresh {
+            output: Box::new(compressed),
+        })
     }
 
     /// Try to delta-encode content against recent cache entries.
@@ -619,10 +638,11 @@ mod tests {
         let path = Path::new("file.txt");
 
         cm.get_or_compress(path, b"content v1", &pipeline).unwrap();
-        let result = cm
-            .get_or_compress(path, b"content v2", &pipeline)
-            .unwrap();
-        assert!(matches!(result, CacheResult::Fresh { .. } | CacheResult::Delta { .. }));
+        let result = cm.get_or_compress(path, b"content v2", &pipeline).unwrap();
+        assert!(matches!(
+            result,
+            CacheResult::Fresh { .. } | CacheResult::Delta { .. }
+        ));
     }
 
     #[test]
@@ -671,16 +691,12 @@ mod tests {
         cm.get_or_compress(&file_path, &content, &pipeline).unwrap();
 
         // Verify it's a hit.
-        let hit = cm
-            .get_or_compress(&file_path, &content, &pipeline)
-            .unwrap();
+        let hit = cm.get_or_compress(&file_path, &content, &pipeline).unwrap();
         assert!(matches!(hit, CacheResult::Dedup { .. }));
 
         cm.invalidate(&file_path).unwrap();
 
-        let miss = cm
-            .get_or_compress(&file_path, &content, &pipeline)
-            .unwrap();
+        let miss = cm.get_or_compress(&file_path, &content, &pipeline).unwrap();
         assert!(matches!(miss, CacheResult::Fresh { .. }));
     }
 
@@ -724,11 +740,7 @@ mod tests {
     fn fresh_ref_returns_dedup() {
         let (store, _dir) = in_memory_store();
         // Generous TTL: one day. Refs stay fresh for the life of the test.
-        let cm = CacheManager::with_ref_age_duration(
-            store,
-            u64::MAX,
-            Duration::from_secs(86_400),
-        );
+        let cm = CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_secs(86_400));
         let pipeline = make_pipeline();
         let content = b"hello world";
         let path = Path::new("file.txt");
@@ -744,11 +756,7 @@ mod tests {
     #[test]
     fn notify_compaction_invalidates_all_refs() {
         let (store, _dir) = in_memory_store();
-        let cm = CacheManager::with_ref_age_duration(
-            store,
-            u64::MAX,
-            Duration::from_secs(86_400),
-        );
+        let cm = CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_secs(86_400));
         let pipeline = make_pipeline();
         let path = Path::new("file.txt");
 
@@ -787,11 +795,7 @@ mod tests {
         let (store, _dir) = in_memory_store();
         // TTL of 10ms: a fresh send bumps accessed_at, so immediately after
         // the re-send the ref is fresh again.
-        let cm = CacheManager::with_ref_age_duration(
-            store,
-            u64::MAX,
-            Duration::from_millis(10),
-        );
+        let cm = CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_millis(10));
         let pipeline = make_pipeline();
         let content = b"hello world";
         let path = Path::new("file.txt");
@@ -816,11 +820,7 @@ mod tests {
     #[test]
     fn check_dedup_returns_none_for_stale_ref() {
         let (store, _dir) = in_memory_store();
-        let cm = CacheManager::with_ref_age_duration(
-            store,
-            u64::MAX,
-            Duration::from_millis(10),
-        );
+        let cm = CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_millis(10));
         let pipeline = make_pipeline();
         let content = b"test content";
         let path = Path::new("file.txt");
@@ -882,7 +882,10 @@ mod tests {
             .and_then(|s| s.strip_suffix('§'))
             .expect("unexpected ref format");
 
-        let result = cm.expand_prefix(prefix).unwrap().expect("expand hit expected");
+        let result = cm
+            .expand_prefix(prefix)
+            .unwrap()
+            .expect("expand hit expected");
         match result {
             ExpandResult::Original { bytes, hash } => {
                 assert_eq!(bytes, content, "expand must return exact original bytes");
@@ -906,9 +909,15 @@ mod tests {
         // garbage without touching SQLite.
         let (store, _dir) = in_memory_store();
         let cm = CacheManager::new(store, u64::MAX);
-        assert!(cm.expand_prefix("").unwrap().is_none(), "empty prefix is no-match");
+        assert!(
+            cm.expand_prefix("").unwrap().is_none(),
+            "empty prefix is no-match"
+        );
         assert!(cm.expand_prefix("not a hex").unwrap().is_none());
-        assert!(cm.expand_prefix("ABCDEF").unwrap().is_none(), "uppercase hex should not match (sqz emits lowercase)");
+        assert!(
+            cm.expand_prefix("ABCDEF").unwrap().is_none(),
+            "uppercase hex should not match (sqz emits lowercase)"
+        );
         assert!(cm.expand_prefix("g0g0g0").unwrap().is_none());
     }
 
@@ -1004,7 +1013,10 @@ mod tests {
             .unwrap()
             .expect("deadbeef prefix should match");
         match result {
-            ExpandResult::CompressedOnly { compressed, hash: h } => {
+            ExpandResult::CompressedOnly {
+                compressed,
+                hash: h,
+            } => {
                 assert_eq!(compressed, "the compressed version");
                 assert_eq!(h, hash);
             }
@@ -1026,11 +1038,7 @@ mod tests {
         let pipeline = make_pipeline();
 
         // Mix of valid UTF-8 and isolated 0xFF bytes.
-        let content: Vec<u8> = vec![
-            b'h', b'e', b'l', b'l', b'o', b'\n',
-            0xFF, 0xFE, 0xFD,
-            b'\n',
-        ];
+        let content: Vec<u8> = vec![b'h', b'e', b'l', b'l', b'o', b'\n', 0xFF, 0xFE, 0xFD, b'\n'];
         let path = Path::new("bin.dat");
         let _ = cm.get_or_compress(path, &content, &pipeline).unwrap();
         // Round-trip via expand_prefix.
@@ -1062,11 +1070,8 @@ mod tests {
         // First "process": populate cache.
         {
             let store = SessionStore::open_or_create(&db_path).unwrap();
-            let cm = CacheManager::with_ref_age_duration(
-                store,
-                u64::MAX,
-                Duration::from_secs(3600),
-            );
+            let cm =
+                CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_secs(3600));
             let first = cm.get_or_compress(path, content, &pipeline).unwrap();
             assert!(matches!(first, CacheResult::Fresh { .. }));
         }
@@ -1074,11 +1079,8 @@ mod tests {
         // Second "process": new CacheManager, same DB. Dedup must fire.
         {
             let store = SessionStore::open_or_create(&db_path).unwrap();
-            let cm = CacheManager::with_ref_age_duration(
-                store,
-                u64::MAX,
-                Duration::from_secs(3600),
-            );
+            let cm =
+                CacheManager::with_ref_age_duration(store, u64::MAX, Duration::from_secs(3600));
             let second = cm.get_or_compress(path, content, &pipeline).unwrap();
             assert!(
                 matches!(second, CacheResult::Dedup { .. }),

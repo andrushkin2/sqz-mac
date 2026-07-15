@@ -1,8 +1,22 @@
 /// Keywords that indicate an image is likely a UI screenshot.
 const UI_KEYWORDS: &[&str] = &[
-    "screenshot", "screen", "ui", "window", "dialog", "modal", "panel",
-    "toolbar", "sidebar", "menu", "popup", "widget", "dashboard", "form",
-    "button", "tab", "nav",
+    "screenshot",
+    "screen",
+    "ui",
+    "window",
+    "dialog",
+    "modal",
+    "panel",
+    "toolbar",
+    "sidebar",
+    "menu",
+    "popup",
+    "widget",
+    "dashboard",
+    "form",
+    "button",
+    "tab",
+    "nav",
 ];
 
 /// Compact semantic description produced from an image.
@@ -99,9 +113,7 @@ Layout: standard application window\nContent summary: {content_summary}"
         let file_str = filename.unwrap_or("unknown");
         let content_str = context.unwrap_or("visual content");
         let size = image_bytes.len();
-        format!(
-            "[Image]\nFile: {file_str}\nSize: {size} bytes\nContent: {content_str}"
-        )
+        format!("[Image]\nFile: {file_str}\nSize: {size} bytes\nContent: {content_str}")
     }
 }
 
@@ -173,28 +185,22 @@ mod tests {
         let compressor = ImageCompressor::new();
         // 56 KB of fake image bytes
         let bytes = vec![0u8; 56 * 1024];
-        let desc = compressor.describe(
-            &bytes,
-            Some("app_screenshot.png"),
-            Some("settings dialog"),
-        );
+        let desc = compressor.describe(&bytes, Some("app_screenshot.png"), Some("settings dialog"));
 
         assert!(desc.is_ui_screenshot);
         assert!(desc.description.contains("[UI Screenshot]"));
         assert!(desc.description.contains("app_screenshot.png"));
         assert!(desc.description.contains("settings dialog"));
-        assert!(desc.description.contains("buttons, text fields, navigation"));
+        assert!(desc
+            .description
+            .contains("buttons, text fields, navigation"));
     }
 
     #[test]
     fn test_describe_general_image_structure() {
         let compressor = ImageCompressor::new();
         let bytes = vec![0u8; 56 * 1024];
-        let desc = compressor.describe(
-            &bytes,
-            Some("landscape.jpg"),
-            Some("mountain scenery"),
-        );
+        let desc = compressor.describe(&bytes, Some("landscape.jpg"), Some("mountain scenery"));
 
         assert!(!desc.is_ui_screenshot);
         assert!(desc.description.contains("[Image]"));
@@ -267,7 +273,10 @@ mod tests {
         );
 
         // Classification
-        assert!(desc.is_ui_screenshot, "should be classified as UI screenshot");
+        assert!(
+            desc.is_ui_screenshot,
+            "should be classified as UI screenshot"
+        );
 
         // Required DOM-like fields present
         assert!(desc.description.contains("[UI Screenshot]"));
@@ -279,7 +288,9 @@ mod tests {
 
         // Filename and context preserved
         assert!(desc.description.contains("main_window_screenshot.png"));
-        assert!(desc.description.contains("application main window with toolbar"));
+        assert!(desc
+            .description
+            .contains("application main window with toolbar"));
 
         // Token reduction ≥ 95%
         assert!(
@@ -320,7 +331,9 @@ mod tests {
 
         // Filename and context preserved
         assert!(desc.description.contains("company_logo.png"));
-        assert!(desc.description.contains("company logo with blue background"));
+        assert!(desc
+            .description
+            .contains("company logo with blue background"));
 
         // Token reduction ≥ 95%
         assert!(

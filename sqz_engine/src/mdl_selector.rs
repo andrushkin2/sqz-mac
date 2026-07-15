@@ -1,11 +1,11 @@
-/// Minimum Description Length (MDL) stage selection.
-///
-/// MDL principle (Rissanen 1978): the best compression is the one that
-/// minimizes description_length(model) + description_length(data|model).
-///
-/// Instead of running all 16 stages on every input, MDL selects the optimal
-/// subset of stages for each content type. Stages that add overhead (headers,
-/// legends) without sufficient compression are skipped.
+//! Minimum Description Length (MDL) stage selection.
+//!
+//! MDL principle (Rissanen 1978): the best compression is the one that
+//! minimizes description_length(model) + description_length(data|model).
+//!
+//! Instead of running all 16 stages on every input, MDL selects the optimal
+//! subset of stages for each content type. Stages that add overhead (headers,
+//! legends) without sufficient compression are skipped.
 
 /// A stage candidate with its estimated cost and benefit.
 #[derive(Debug, Clone)]
@@ -70,7 +70,7 @@ pub fn select_stages(profile: &ContentProfile) -> MdlSelection {
     let mut candidates = build_candidates(profile);
 
     // Sort by net benefit descending
-    candidates.sort_by(|a, b| b.net_benefit().cmp(&a.net_benefit()));
+    candidates.sort_by_key(|b| std::cmp::Reverse(b.net_benefit()));
 
     let mut enabled = Vec::new();
     let mut skipped = Vec::new();
@@ -108,7 +108,11 @@ fn build_candidates(p: &ContentProfile) -> Vec<StageCandidate> {
         StageCandidate {
             name: "strip_nulls".to_string(),
             overhead_tokens: 0,
-            savings_tokens: if p.is_json { (p.null_count as u32) * 3 } else { 0 },
+            savings_tokens: if p.is_json {
+                (p.null_count as u32) * 3
+            } else {
+                0
+            },
             applicable: p.is_json && p.null_count > 0,
         },
         StageCandidate {
@@ -148,19 +152,31 @@ fn build_candidates(p: &ContentProfile) -> Vec<StageCandidate> {
         StageCandidate {
             name: "rle".to_string(),
             overhead_tokens: 3, // "[×N]" markers
-            savings_tokens: if p.has_repetition && !p.is_json { p.tokens / 5 } else { 0 },
+            savings_tokens: if p.has_repetition && !p.is_json {
+                p.tokens / 5
+            } else {
+                0
+            },
             applicable: !p.is_json && p.has_repetition && p.length > 200,
         },
         StageCandidate {
             name: "sliding_window_dedup".to_string(),
             overhead_tokens: 2, // "[→LN]" markers
-            savings_tokens: if p.has_repetition && !p.is_json { p.tokens / 8 } else { 0 },
+            savings_tokens: if p.has_repetition && !p.is_json {
+                p.tokens / 8
+            } else {
+                0
+            },
             applicable: !p.is_json && p.has_repetition && p.length > 300,
         },
         StageCandidate {
             name: "entropy_truncate".to_string(),
             overhead_tokens: 3, // "[N segments omitted]"
-            savings_tokens: if p.is_prose && p.tokens > 100 { p.tokens / 6 } else { 0 },
+            savings_tokens: if p.is_prose && p.tokens > 100 {
+                p.tokens / 6
+            } else {
+                0
+            },
             applicable: !p.is_json && p.is_prose && p.length > 500,
         },
         StageCandidate {
@@ -172,7 +188,11 @@ fn build_candidates(p: &ContentProfile) -> Vec<StageCandidate> {
         StageCandidate {
             name: "dict_compress".to_string(),
             overhead_tokens: 15, // §dict§ header
-            savings_tokens: if p.is_json && p.tokens > 50 { p.tokens / 8 } else { 0 },
+            savings_tokens: if p.is_json && p.tokens > 50 {
+                p.tokens / 8
+            } else {
+                0
+            },
             applicable: p.is_json && p.tokens > 120, // only worth it for larger JSON
         },
         StageCandidate {
@@ -184,7 +204,11 @@ fn build_candidates(p: &ContentProfile) -> Vec<StageCandidate> {
         StageCandidate {
             name: "textrank".to_string(),
             overhead_tokens: 0,
-            savings_tokens: if p.is_prose && p.tokens > 200 { p.tokens / 3 } else { 0 },
+            savings_tokens: if p.is_prose && p.tokens > 200 {
+                p.tokens / 3
+            } else {
+                0
+            },
             applicable: p.is_prose && p.tokens > 200,
         },
     ]
@@ -194,7 +218,7 @@ fn build_candidates(p: &ContentProfile) -> Vec<StageCandidate> {
 pub fn profile_content(text: &str) -> ContentProfile {
     let is_json = text.trim().starts_with('{') || text.trim().starts_with('[');
     let lines: Vec<&str> = text.lines().collect();
-    let tokens = (text.len() as u32 + 3) / 4;
+    let tokens = (text.len() as u32).div_ceil(4);
 
     // Check for repetition
     let mut has_repetition = false;
@@ -216,16 +240,19 @@ pub fn profile_content(text: &str) -> ContentProfile {
     }
 
     let is_diff = text.contains("\n+") && text.contains("\n-") && text.contains("@@");
-    let is_log = lines.iter().take(10).any(|l| {
-        l.contains("[INFO]") || l.contains("[ERROR]") || l.contains("[WARN]")
-    });
+    let is_log = lines
+        .iter()
+        .take(10)
+        .any(|l| l.contains("[INFO]") || l.contains("[ERROR]") || l.contains("[WARN]"));
 
     // Prose heuristic
     let mut prose_lines = 0;
     let mut code_lines = 0;
     for line in lines.iter().take(20) {
         let t = line.trim();
-        if t.is_empty() { continue; }
+        if t.is_empty() {
+            continue;
+        }
         if t.ends_with('{') || t.ends_with(';') || t.contains("::") || t.contains("->") {
             code_lines += 1;
         } else {
@@ -235,7 +262,11 @@ pub fn profile_content(text: &str) -> ContentProfile {
     let is_prose = prose_lines > code_lines && !is_json && !is_diff && !is_log;
 
     // JSON-specific metrics
-    let null_count = if is_json { text.matches(":null").count() + text.matches(": null").count() } else { 0 };
+    let null_count = if is_json {
+        text.matches(":null").count() + text.matches(": null").count()
+    } else {
+        0
+    };
     let array_element_count = if is_json {
         text.matches('{').count().saturating_sub(1) // rough estimate
     } else {
@@ -271,7 +302,8 @@ mod tests {
 
     #[test]
     fn test_prose_profile() {
-        let p = profile_content("This is a normal sentence about something interesting and important.");
+        let p =
+            profile_content("This is a normal sentence about something interesting and important.");
         assert!(p.is_prose);
         assert!(!p.is_json);
     }

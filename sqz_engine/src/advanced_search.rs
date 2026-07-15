@@ -89,10 +89,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
     for i in 1..=m {
         curr[0] = i;
         for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -114,10 +116,7 @@ fn extract_snippet(content: &str, query_terms: &[&str], window: usize) -> String
         }
     }
 
-    let pos = match best_pos {
-        Some(p) => p,
-        None => 0,
-    };
+    let pos = best_pos.unwrap_or_default();
 
     let start = pos.saturating_sub(window);
     let end = (pos + window).min(content.len());
@@ -125,22 +124,26 @@ fn extract_snippet(content: &str, query_terms: &[&str], window: usize) -> String
     // Snap to char boundaries (stable alternative to floor/ceil_char_boundary).
     let start = {
         let mut i = start;
-        while i > 0 && !content.is_char_boundary(i) { i -= 1; }
+        while i > 0 && !content.is_char_boundary(i) {
+            i -= 1;
+        }
         i
     };
     let end = {
         let mut i = end;
-        while i < content.len() && !content.is_char_boundary(i) { i += 1; }
+        while i < content.len() && !content.is_char_boundary(i) {
+            i += 1;
+        }
         i
     };
 
     let mut snippet = String::new();
     if start > 0 {
-        snippet.push_str("…");
+        snippet.push('…');
     }
     snippet.push_str(&content[start..end]);
     if end < content.len() {
-        snippet.push_str("…");
+        snippet.push('…');
     }
     snippet
 }
@@ -306,7 +309,11 @@ impl AdvancedSearch {
             .collect();
 
         // Sort descending by fused score.
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results
     }
 
@@ -328,10 +335,8 @@ impl AdvancedSearch {
             let mut best: Option<(usize, String)> = None;
             for word in &vocab {
                 let dist = levenshtein(&lower, word);
-                if dist > 0 && dist <= 2 {
-                    if best.as_ref().map_or(true, |(d, _)| dist < *d) {
-                        best = Some((dist, word.clone()));
-                    }
+                if dist > 0 && dist <= 2 && best.as_ref().is_none_or(|(d, _)| dist < *d) {
+                    best = Some((dist, word.clone()));
                 }
             }
             if let Some((_dist, correction)) = best {
@@ -378,7 +383,7 @@ impl AdvancedSearch {
 
     /// Proximity reranking: boost results where query terms appear close
     /// together in the document content.
-    fn proximity_rerank(&self, results: &mut Vec<SearchResult>, query_terms: &[&str]) {
+    fn proximity_rerank(&self, results: &mut [SearchResult], query_terms: &[&str]) {
         for r in results.iter_mut() {
             let content = match self.get_content(&r.id) {
                 Ok(c) => c,
@@ -406,7 +411,11 @@ impl AdvancedSearch {
         }
 
         // Re-sort after boosting.
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 }
 
@@ -423,8 +432,10 @@ mod tests {
     #[test]
     fn test_index_and_bm25_search() {
         let s = make_search();
-        s.index("d1", "the quick brown fox jumps over the lazy dog").unwrap();
-        s.index("d2", "a fast red car drives on the highway").unwrap();
+        s.index("d1", "the quick brown fox jumps over the lazy dog")
+            .unwrap();
+        s.index("d2", "a fast red car drives on the highway")
+            .unwrap();
 
         let results = s.bm25_search("fox");
         assert_eq!(results.len(), 1);
@@ -434,8 +445,10 @@ mod tests {
     #[test]
     fn test_trigram_search() {
         let s = make_search();
-        s.index("d1", "authentication middleware handles tokens").unwrap();
-        s.index("d2", "database migration scripts for postgres").unwrap();
+        s.index("d1", "authentication middleware handles tokens")
+            .unwrap();
+        s.index("d2", "database migration scripts for postgres")
+            .unwrap();
 
         let results = s.trigram_search("auth");
         assert_eq!(results.len(), 1);
@@ -446,7 +459,8 @@ mod tests {
     fn test_rrf_merge_both_lists() {
         let s = make_search();
         s.index("d1", "rust programming language systems").unwrap();
-        s.index("d2", "rust prevention coating for metal surfaces").unwrap();
+        s.index("d2", "rust prevention coating for metal surfaces")
+            .unwrap();
         s.index("d3", "programming in python is fun").unwrap();
 
         // "rust programming" should match d1 in both porter and trigram,
@@ -462,7 +476,8 @@ mod tests {
         // d1 contains both "alpha" and "beta" — will appear in both BM25 and trigram.
         s.index("d1", "alpha beta gamma delta").unwrap();
         // d2 contains only "alpha".
-        s.index("d2", "alpha only here nothing else relevant").unwrap();
+        s.index("d2", "alpha only here nothing else relevant")
+            .unwrap();
 
         let bm25 = s.bm25_search("alpha");
         let trigram = s.trigram_search("alpha");
@@ -471,12 +486,14 @@ mod tests {
         let merged = s.reciprocal_rank_fusion(&bm25, &trigram);
         // d1 and d2 both appear in both lists, but let's just verify the
         // merge produces results from both lists.
-        assert!(merged.len() >= 1);
+        assert!(!merged.is_empty());
 
         // Docs appearing in both lists should have higher scores.
         let in_bm25: std::collections::HashSet<_> = bm25.iter().map(|(_, id)| id.clone()).collect();
-        let in_trigram: std::collections::HashSet<_> = trigram.iter().map(|(_, id)| id.clone()).collect();
-        let in_both: std::collections::HashSet<_> = in_bm25.intersection(&in_trigram).cloned().collect();
+        let in_trigram: std::collections::HashSet<_> =
+            trigram.iter().map(|(_, id)| id.clone()).collect();
+        let in_both: std::collections::HashSet<_> =
+            in_bm25.intersection(&in_trigram).cloned().collect();
 
         if merged.len() >= 2 {
             let top = &merged[0];
@@ -502,7 +519,8 @@ mod tests {
     #[test]
     fn test_fuzzy_search_end_to_end() {
         let s = make_search();
-        s.index("d1", "authentication middleware handles tokens").unwrap();
+        s.index("d1", "authentication middleware handles tokens")
+            .unwrap();
 
         // Typo query — should still find d1 via fuzzy correction.
         let results = s.search("authentcation").unwrap();
@@ -514,7 +532,8 @@ mod tests {
     fn test_proximity_reranking() {
         let s = make_search();
         // d1: terms "error" and "handler" are close together.
-        s.index("d1", "the error handler catches all exceptions").unwrap();
+        s.index("d1", "the error handler catches all exceptions")
+            .unwrap();
         // d2: terms "error" and "handler" are far apart.
         s.index(
             "d2",
@@ -590,8 +609,11 @@ mod tests {
     fn test_multiple_documents_search() {
         let s = make_search();
         for i in 0..10 {
-            s.index(&format!("d{}", i), &format!("document number {} about testing", i))
-                .unwrap();
+            s.index(
+                &format!("d{}", i),
+                &format!("document number {} about testing", i),
+            )
+            .unwrap();
         }
         let results = s.search("testing").unwrap();
         assert_eq!(results.len(), 10);

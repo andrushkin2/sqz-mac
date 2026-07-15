@@ -1,3 +1,6 @@
+use sqz_engine::{
+    format_command, CompressedContent, DependencyMapper, NgramAbbreviator, SqzEngine,
+};
 /// CLI Proxy — intercepts command output and compresses it through SqzEngine.
 ///
 /// `CliProxy::intercept_output` is the core entry point: it takes raw command
@@ -6,12 +9,10 @@
 ///
 /// On any failure it logs the error and returns the original output unchanged
 /// (transparent fallback, Requirement 1.5).
-
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use sqz_engine::{format_command, CompressedContent, DependencyMapper, NgramAbbreviator, SqzEngine};
 
 // ── CLI compression patterns ──────────────────────────────────────────────
 
@@ -20,43 +21,171 @@ use sqz_engine::{format_command, CompressedContent, DependencyMapper, NgramAbbre
 /// The list covers 90+ distinct command output formats (Requirement 1.2).
 pub const CLI_PATTERNS: &[&str] = &[
     // Version control
-    "git", "hg", "svn", "fossil",
+    "git",
+    "hg",
+    "svn",
+    "fossil",
     // Build tools
-    "cargo", "make", "cmake", "ninja", "bazel", "buck", "gradle", "mvn",
-    "ant", "sbt", "lein", "mix", "rebar3",
+    "cargo",
+    "make",
+    "cmake",
+    "ninja",
+    "bazel",
+    "buck",
+    "gradle",
+    "mvn",
+    "ant",
+    "sbt",
+    "lein",
+    "mix",
+    "rebar3",
     // Package managers
-    "npm", "yarn", "pnpm", "bun", "pip", "pip3", "poetry", "pipenv",
-    "conda", "gem", "bundle", "composer", "go", "dep", "glide",
-    "apt", "apt-get", "dpkg", "yum", "dnf", "rpm", "pacman", "brew",
-    "port", "snap", "flatpak", "nix", "guix",
+    "npm",
+    "yarn",
+    "pnpm",
+    "bun",
+    "pip",
+    "pip3",
+    "poetry",
+    "pipenv",
+    "conda",
+    "gem",
+    "bundle",
+    "composer",
+    "go",
+    "dep",
+    "glide",
+    "apt",
+    "apt-get",
+    "dpkg",
+    "yum",
+    "dnf",
+    "rpm",
+    "pacman",
+    "brew",
+    "port",
+    "snap",
+    "flatpak",
+    "nix",
+    "guix",
     // Containers / orchestration
-    "docker", "podman", "buildah", "skopeo", "kubectl", "helm", "k9s",
-    "minikube", "kind", "k3s", "nomad", "consul", "vault",
+    "docker",
+    "podman",
+    "buildah",
+    "skopeo",
+    "kubectl",
+    "helm",
+    "k9s",
+    "minikube",
+    "kind",
+    "k3s",
+    "nomad",
+    "consul",
+    "vault",
     // Cloud CLIs
-    "aws", "az", "gcloud", "gsutil", "terraform", "pulumi", "cdk",
-    "serverless", "sam",
+    "aws",
+    "az",
+    "gcloud",
+    "gsutil",
+    "terraform",
+    "pulumi",
+    "cdk",
+    "serverless",
+    "sam",
     // Language runtimes
-    "node", "deno", "python", "python3", "ruby", "java", "kotlin",
-    "scala", "clojure", "elixir", "erlang", "ghc", "rustc", "clang",
-    "gcc", "g++",
+    "node",
+    "deno",
+    "python",
+    "python3",
+    "ruby",
+    "java",
+    "kotlin",
+    "scala",
+    "clojure",
+    "elixir",
+    "erlang",
+    "ghc",
+    "rustc",
+    "clang",
+    "gcc",
+    "g++",
     // Test runners
-    "jest", "mocha", "pytest", "rspec", "minitest", "phpunit", "vitest",
-    "cypress", "playwright",
+    "jest",
+    "mocha",
+    "pytest",
+    "rspec",
+    "minitest",
+    "phpunit",
+    "vitest",
+    "cypress",
+    "playwright",
     // Linters / formatters
-    "eslint", "tslint", "prettier", "black", "isort", "flake8", "mypy",
-    "pylint", "rubocop", "golangci-lint", "clippy", "rustfmt",
+    "eslint",
+    "tslint",
+    "prettier",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "pylint",
+    "rubocop",
+    "golangci-lint",
+    "clippy",
+    "rustfmt",
     // System / network
-    "curl", "wget", "ssh", "scp", "rsync", "nc", "netstat", "ss",
-    "ping", "traceroute", "dig", "nslookup", "openssl",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "rsync",
+    "nc",
+    "netstat",
+    "ss",
+    "ping",
+    "traceroute",
+    "dig",
+    "nslookup",
+    "openssl",
     // File / text processing
-    "find", "grep", "rg", "ag", "fd", "ls", "tree", "cat", "less",
-    "head", "tail", "wc", "sort", "uniq", "awk", "sed", "jq", "yq",
+    "find",
+    "grep",
+    "rg",
+    "ag",
+    "fd",
+    "ls",
+    "tree",
+    "cat",
+    "less",
+    "head",
+    "tail",
+    "wc",
+    "sort",
+    "uniq",
+    "awk",
+    "sed",
+    "jq",
+    "yq",
     // Databases
-    "psql", "mysql", "sqlite3", "mongo", "redis-cli", "influx",
+    "psql",
+    "mysql",
+    "sqlite3",
+    "mongo",
+    "redis-cli",
+    "influx",
     // Misc dev tools
-    "gh", "hub", "lab", "glab", "jira", "linear",
-    "ansible", "chef", "puppet", "salt",
-    "ffmpeg", "convert", "identify",
+    "gh",
+    "hub",
+    "lab",
+    "glab",
+    "jira",
+    "linear",
+    "ansible",
+    "chef",
+    "puppet",
+    "salt",
+    "ffmpeg",
+    "convert",
+    "identify",
 ];
 
 // ── Command-aware pre-processors ─────────────────────────────────────────
@@ -198,7 +327,8 @@ impl CliProxy {
         let fast_hash = content_hash(output);
         if !opts.no_cache && self.l1_cache.borrow().contains(&fast_hash) {
             // L1 hit — check L2 persistent cache for the actual ref
-            if let Ok(Some(inline_ref)) = self.engine.cache_manager().check_dedup(output.as_bytes()) {
+            if let Ok(Some(inline_ref)) = self.engine.cache_manager().check_dedup(output.as_bytes())
+            {
                 eprintln!("[sqz] dedup hit: {} (L1+L2)", inline_ref);
                 self.log_dedup_hit(cmd, output);
                 return inline_ref;
@@ -207,7 +337,8 @@ impl CliProxy {
 
         // Step 2: L2 persistent SHA-256 dedup check (survives restarts)
         if !opts.no_cache {
-            if let Ok(Some(inline_ref)) = self.engine.cache_manager().check_dedup(output.as_bytes()) {
+            if let Ok(Some(inline_ref)) = self.engine.cache_manager().check_dedup(output.as_bytes())
+            {
                 // Promote to L1 for faster future lookups
                 self.l1_cache.borrow_mut().insert(fast_hash);
                 eprintln!("[sqz] dedup hit: {} (L2)", inline_ref);
@@ -218,15 +349,18 @@ impl CliProxy {
 
         // Step 3: Try per-command formatter
         if let Some(formatted) = format_command(cmd, output) {
-            let tokens_original = (output.len() as u32 + 3) / 4;
-            let tokens_compressed = (formatted.len() as u32 + 3) / 4;
+            let tokens_original = (output.len() as u32).div_ceil(4);
+            let tokens_compressed = (formatted.len() as u32).div_ceil(4);
             if tokens_compressed < tokens_original {
                 // Persist to L2 cache — but skip if content contains secrets
                 // (confidence router detected high-risk patterns like API keys)
                 let mode = self.engine.route_compression_mode(output);
                 if mode != sqz_engine::CompressionMode::Safe {
                     if let Ok(compressed) = self.engine.compress(&formatted) {
-                        let _ = self.engine.cache_manager().store_compressed(output.as_bytes(), &compressed);
+                        let _ = self
+                            .engine
+                            .cache_manager()
+                            .store_compressed(output.as_bytes(), &compressed);
                     }
                 }
                 self.l1_cache.borrow_mut().insert(fast_hash);
@@ -244,7 +378,10 @@ impl CliProxy {
                 // (may contain secrets, API keys, passwords)
                 let mode = self.engine.route_compression_mode(output);
                 if mode != sqz_engine::CompressionMode::Safe {
-                    let _ = self.engine.cache_manager().store_compressed(output.as_bytes(), &compressed);
+                    let _ = self
+                        .engine
+                        .cache_manager()
+                        .store_compressed(output.as_bytes(), &compressed);
                 }
                 self.l1_cache.borrow_mut().insert(fast_hash);
                 self.log_compression(cmd, tokens_original, tokens_compressed);
@@ -255,7 +392,10 @@ impl CliProxy {
                 abbr.observe(&compressed.data);
                 let abbreviated = match abbr.abbreviate(&compressed.data) {
                     Ok(result) if result.total_tokens_saved > 0 => {
-                        eprintln!("[sqz] n-gram abbreviation: {} tokens saved", result.total_tokens_saved);
+                        eprintln!(
+                            "[sqz] n-gram abbreviation: {} tokens saved",
+                            result.total_tokens_saved
+                        );
                         result.text
                     }
                     _ => compressed.data,
@@ -273,12 +413,22 @@ impl CliProxy {
     /// Log compression stats to stderr.
     fn log_compression(&self, cmd: &str, original: u32, compressed: u32) {
         let saved = original.saturating_sub(compressed);
-        let pct = if original > 0 { (saved as f64 / original as f64 * 100.0) as u32 } else { 0 };
-        eprintln!("[sqz] {}/{} tokens ({}% reduction) [{}]", compressed, original, pct, cmd);
+        let pct = if original > 0 {
+            (saved as f64 / original as f64 * 100.0) as u32
+        } else {
+            0
+        };
+        eprintln!(
+            "[sqz] {}/{} tokens ({}% reduction) [{}]",
+            compressed, original, pct, cmd
+        );
         let project = std::env::current_dir().ok();
         let project_str = project.as_ref().map(|p| p.to_string_lossy().to_string());
         let _ = self.engine.session_store().log_compression_with_project(
-            original, compressed, &[], cmd,
+            original,
+            compressed,
+            &[],
+            cmd,
             project_str.as_deref(),
         );
     }
@@ -297,7 +447,7 @@ impl CliProxy {
     /// tiktoken counts is a separate follow-up; using the same heuristic
     /// keeps the reporting internally consistent.
     fn log_dedup_hit(&self, _cmd: &str, output: &str) {
-        let tokens_original = (output.len() as u32 + 3) / 4;
+        let tokens_original = (output.len() as u32).div_ceil(4);
         const DEDUP_REF_TOKENS: u32 = 13;
         let project = std::env::current_dir().ok();
         let project_str = project.as_ref().map(|p| p.to_string_lossy().to_string());
@@ -322,14 +472,12 @@ impl CliProxy {
     /// "lossy compression requires explicit opt-in" true end-to-end: neither
     /// the confidence router's auto-classification nor this pressure-based
     /// escalation can reach the lossy subsystem on their own.
-    fn compress_output(
-        &self,
-        _cmd: &str,
-        output: &str,
-    ) -> sqz_engine::Result<CompressedContent> {
+    fn compress_output(&self, _cmd: &str, output: &str) -> sqz_engine::Result<CompressedContent> {
         // Adaptive pressure: check how many tokens have been injected
         // in the last 30 minutes. If above threshold, compress harder.
-        let pressure = self.engine.session_store()
+        let pressure = self
+            .engine
+            .session_store()
             .session_pressure(30)
             .unwrap_or(0);
 
@@ -337,8 +485,12 @@ impl CliProxy {
         // >80k tokens in 30min = high pressure → aggressive mode
         // >120k tokens in 30min = critical → aggressive mode
         if pressure > 80_000 && sqz_engine::lossy_allowed() {
-            eprintln!("[sqz] adaptive: high session pressure ({} tokens/30min), escalating compression", pressure);
-            self.engine.compress_with_mode(output, sqz_engine::CompressionMode::Aggressive)
+            eprintln!(
+                "[sqz] adaptive: high session pressure ({} tokens/30min), escalating compression",
+                pressure
+            );
+            self.engine
+                .compress_with_mode(output, sqz_engine::CompressionMode::Aggressive)
         } else {
             self.engine.compress(output)
         }
@@ -382,7 +534,10 @@ impl CliProxy {
     /// separate process).
     fn track_file(&self, cmd: &str, output: &str) {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
-        let base = parts.first().map(|s| s.rsplit('/').next().unwrap_or(s)).unwrap_or("");
+        let base = parts
+            .first()
+            .map(|s| s.rsplit('/').next().unwrap_or(s))
+            .unwrap_or("");
 
         match base {
             "cat" | "head" | "tail" | "less" | "bat" => {
@@ -432,15 +587,20 @@ impl CliProxy {
                 // Read and hash the file content
                 if let Ok(dep_content) = std::fs::read_to_string(&resolved) {
                     // Check if already in persistent cache
-                    if let Ok(Some(_)) = self.engine.cache_manager().check_dedup(dep_content.as_bytes()) {
+                    if let Ok(Some(_)) = self
+                        .engine
+                        .cache_manager()
+                        .check_dedup(dep_content.as_bytes())
+                    {
                         continue; // Already cached
                     }
 
                     // Compress and persist to L2 cache
                     if let Ok(compressed) = self.engine.compress(&dep_content) {
-                        let _ = self.engine.cache_manager().store_compressed(
-                            dep_content.as_bytes(), &compressed,
-                        );
+                        let _ = self
+                            .engine
+                            .cache_manager()
+                            .store_compressed(dep_content.as_bytes(), &compressed);
                         let hash = content_hash(&dep_content);
                         self.l1_cache.borrow_mut().insert(hash);
                         let dep_str = resolved.to_string_lossy().to_string();
@@ -453,8 +613,10 @@ impl CliProxy {
         }
 
         if precached > 0 {
-            eprintln!("[sqz] predictive pre-cache: {} dependencies of {} cached",
-                precached, file_path);
+            eprintln!(
+                "[sqz] predictive pre-cache: {} dependencies of {} cached",
+                precached, file_path
+            );
         }
     }
 
@@ -468,9 +630,7 @@ impl CliProxy {
             .rsplit('/')
             .next()
             .unwrap_or("");
-        CLI_PATTERNS
-            .iter()
-            .any(|p| base.eq_ignore_ascii_case(p))
+        CLI_PATTERNS.iter().any(|p| base.eq_ignore_ascii_case(p))
     }
 
     /// Main event loop: read all stdin, compress, write to stdout.
@@ -557,7 +717,10 @@ mod tests {
 
         // Capture the compression count before the two calls.
         let store = proxy.engine.session_store();
-        let count_before = store.compression_stats().unwrap_or_default().total_compressions;
+        let count_before = store
+            .compression_stats()
+            .unwrap_or_default()
+            .total_compressions;
 
         let first = proxy.intercept_output("echo", &output);
         let second = proxy.intercept_output("echo", &output);
@@ -576,7 +739,10 @@ mod tests {
         // Both calls must be recorded in the log. Before the April 18
         // reporting fix, dedup hits returned early and never logged — so
         // `sqz stats` undercounted. This assertion locks in the fix.
-        let count_after = store.compression_stats().unwrap_or_default().total_compressions;
+        let count_after = store
+            .compression_stats()
+            .unwrap_or_default()
+            .total_compressions;
         assert!(
             count_after >= count_before + 2,
             "both intercept calls must be logged (including dedup hit); \
@@ -591,7 +757,10 @@ mod tests {
         proxy.intercept_output("cat src/main.rs", content);
         // File should be persisted in the session store
         let known = proxy.engine.session_store().known_files().unwrap();
-        assert!(known.contains(&"src/main.rs".to_string()), "cat should track the file path");
+        assert!(
+            known.contains(&"src/main.rs".to_string()),
+            "cat should track the file path"
+        );
     }
 
     #[test]
@@ -602,7 +771,11 @@ mod tests {
         // Error output referencing that file
         let error = "error[E0308]: mismatched types\n --> src/auth.rs:42:5\n";
         let result = proxy.apply_context_refs(error);
-        assert!(result.contains("[in context]"), "should annotate known file: {}", result);
+        assert!(
+            result.contains("[in context]"),
+            "should annotate known file: {}",
+            result
+        );
     }
 
     #[test]
@@ -610,7 +783,10 @@ mod tests {
         let proxy = CliProxy::new().expect("engine init");
         let error = "error[E0308]: mismatched types\n --> src/unknown.rs:42:5\n";
         let result = proxy.apply_context_refs(error);
-        assert!(!result.contains("[in context]"), "should not annotate unknown file");
+        assert!(
+            !result.contains("[in context]"),
+            "should not annotate unknown file"
+        );
     }
 
     // ── Regression tests for Reddit bug report ────────────────────────────
@@ -647,11 +823,14 @@ mod tests {
                       drwxr-xr-x  3 user user 4096 Apr 15 10:00 configuration\n\
                       drwxr-xr-x  2 user user 4096 Apr 15 10:00 documentation\n";
         let result = proxy.intercept_output("ls -la", output);
-        assert_not_abbreviated(&result, &[
-            ("pkgs", "packages→pkgs regression"),
-            (" config/", "configuration→config path rewrite"),
-            (" docs/", "documentation→docs path rewrite"),
-        ]);
+        assert_not_abbreviated(
+            &result,
+            &[
+                ("pkgs", "packages→pkgs regression"),
+                (" config/", "configuration→config path rewrite"),
+                (" docs/", "documentation→docs path rewrite"),
+            ],
+        );
         // If not a dedup hit, the original identifiers must survive.
         if !result.starts_with("§ref:") {
             assert!(result.contains("packages"), "{}", result);
@@ -667,11 +846,14 @@ mod tests {
                       /usr/share/documentation/readme.md\n\
                       /home/user/.local/environment/config\n";
         let result = proxy.intercept_output("find /etc -name '*.yml'", output);
-        assert_not_abbreviated(&result, &[
-            ("/etc/myapp/config/", "configuration→config path rewrite"),
-            ("/usr/share/docs/", "documentation→docs path rewrite"),
-            (".local/env/", "environment→env path rewrite"),
-        ]);
+        assert_not_abbreviated(
+            &result,
+            &[
+                ("/etc/myapp/config/", "configuration→config path rewrite"),
+                ("/usr/share/docs/", "documentation→docs path rewrite"),
+                (".local/env/", "environment→env path rewrite"),
+            ],
+        );
         if !result.starts_with("§ref:") {
             assert!(result.contains("configuration"), "{}", result);
             assert!(result.contains("documentation"), "{}", result);
@@ -685,9 +867,10 @@ mod tests {
         let output = "origin\thttps://github.com/example/repository.git (fetch)\n\
                       origin\thttps://github.com/example/repository.git (push)\n";
         let result = proxy.intercept_output("git remote -v", output);
-        assert_not_abbreviated(&result, &[
-            ("github.com/example/repo.git", "repository→repo URL rewrite"),
-        ]);
+        assert_not_abbreviated(
+            &result,
+            &[("github.com/example/repo.git", "repository→repo URL rewrite")],
+        );
         if !result.starts_with("§ref:") {
             assert!(result.contains("repository"), "{}", result);
         }
@@ -696,13 +879,15 @@ mod tests {
     #[test]
     fn test_identifiers_preserved_in_code_output() {
         let proxy = CliProxy::new().expect("engine init");
-        let output = "error[E0433]: failed to resolve: use of undeclared crate or module `implementation`\n\
+        let output =
+            "error[E0433]: failed to resolve: use of undeclared crate or module `implementation`\n\
                       --> src/main.rs:5:5\n\
                       5 | use implementation::Config;\n";
         let result = proxy.intercept_output("cargo build", output);
-        assert_not_abbreviated(&result, &[
-            ("use impl::Config", "implementation→impl identifier rewrite"),
-        ]);
+        assert_not_abbreviated(
+            &result,
+            &[("use impl::Config", "implementation→impl identifier rewrite")],
+        );
         if !result.starts_with("§ref:") {
             assert!(result.contains("implementation"), "{}", result);
         }
@@ -723,15 +908,30 @@ mod tests {
                       -rw-r--r--  1 user user  512 Apr 18 10:00 Cargo.toml\n\
                       -rw-r--r--  1 user user  256 Apr 18 10:00 LICENSE\n";
         let result = proxy.intercept_output("ls -la", output);
-        assert_not_abbreviated(&result, &[
-            ("unique values", "RLE pattern-run must not summarize filenames away"),
-            ("pkgs/", "packages→pkgs rewrite"),
-        ]);
+        assert_not_abbreviated(
+            &result,
+            &[
+                (
+                    "unique values",
+                    "RLE pattern-run must not summarize filenames away",
+                ),
+                ("pkgs/", "packages→pkgs rewrite"),
+            ],
+        );
         if !result.starts_with("§ref:") {
-            for name in &["packages", "configuration", "documentation", "environment",
-                          "README.md", "Cargo.toml", "LICENSE"] {
-                assert!(result.contains(name),
-                    "filename '{name}' must appear in output — got:\n{result}");
+            for name in &[
+                "packages",
+                "configuration",
+                "documentation",
+                "environment",
+                "README.md",
+                "Cargo.toml",
+                "LICENSE",
+            ] {
+                assert!(
+                    result.contains(name),
+                    "filename '{name}' must appear in output — got:\n{result}"
+                );
             }
         }
     }

@@ -80,9 +80,7 @@ impl RegretTracker {
 
     /// Record a regret event and update the file's compression profile.
     pub fn record_regret(&mut self, event: RegretEvent) {
-        let profile = self.profiles
-            .entry(event.content_id.clone())
-            .or_default();
+        let profile = self.profiles.entry(event.content_id.clone()).or_default();
 
         profile.regret_count += 1;
         profile.last_access_turn = event.turn;
@@ -94,17 +92,14 @@ impl RegretTracker {
             RegretKind::InformationLoss => self.decay_rate * 2.0,
         };
 
-        profile.aggressiveness = (profile.aggressiveness - penalty)
-            .max(self.min_aggressiveness);
+        profile.aggressiveness = (profile.aggressiveness - penalty).max(self.min_aggressiveness);
 
         self.events.push(event);
     }
 
     /// Record a successful compression (no regret) — slowly increase aggressiveness.
     pub fn record_success(&mut self, content_id: &str, turn: u64) {
-        let profile = self.profiles
-            .entry(content_id.to_string())
-            .or_default();
+        let profile = self.profiles.entry(content_id.to_string()).or_default();
 
         profile.last_access_turn = turn;
 
@@ -133,10 +128,8 @@ impl RegretTracker {
 
     /// Get a summary of the most regretted files.
     pub fn most_regretted(&self, top_n: usize) -> Vec<(&str, &FileProfile)> {
-        let mut sorted: Vec<_> = self.profiles.iter()
-            .map(|(k, v)| (k.as_str(), v))
-            .collect();
-        sorted.sort_by(|a, b| b.1.regret_count.cmp(&a.1.regret_count));
+        let mut sorted: Vec<_> = self.profiles.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1.regret_count));
         sorted.truncate(top_n);
         sorted
     }
@@ -191,7 +184,10 @@ mod tests {
         });
 
         let after = tracker.recommended_aggressiveness("auth.rs");
-        assert!(after < initial, "aggressiveness should decrease after regret");
+        assert!(
+            after < initial,
+            "aggressiveness should decrease after regret"
+        );
     }
 
     #[test]
@@ -207,7 +203,10 @@ mod tests {
         }
 
         let agg = tracker.recommended_aggressiveness("config.yaml");
-        assert_eq!(agg, 0.1, "should hit minimum aggressiveness after many regrets");
+        assert_eq!(
+            agg, 0.1,
+            "should hit minimum aggressiveness after many regrets"
+        );
     }
 
     #[test]
@@ -227,7 +226,10 @@ mod tests {
         }
 
         let after_recovery = tracker.recommended_aggressiveness("lib.rs");
-        assert!(after_recovery > after_regret, "aggressiveness should recover after successes");
+        assert!(
+            after_recovery > after_regret,
+            "aggressiveness should recover after successes"
+        );
     }
 
     #[test]

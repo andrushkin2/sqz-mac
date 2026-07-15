@@ -14,7 +14,6 @@ use rusqlite::{Connection, OpenFlags};
 
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
-const GREEN: &str = "\x1b[32m";
 const BRIGHT_GREEN: &str = "\x1b[92m";
 const YELLOW: &str = "\x1b[33m";
 const CYAN: &str = "\x1b[36m";
@@ -200,7 +199,9 @@ pub fn enter_raw_mode() -> Result<TerminalGuard, String> {
             ));
         }
 
-        Ok(TerminalGuard { original_termios: original })
+        Ok(TerminalGuard {
+            original_termios: original,
+        })
     }
 }
 
@@ -221,7 +222,10 @@ static RESIZE_REQUESTED: AtomicBool = AtomicBool::new(false);
 #[cfg(unix)]
 fn register_sigwinch_handler() {
     unsafe {
-        libc::signal(libc::SIGWINCH, sigwinch_handler as libc::sighandler_t);
+        libc::signal(
+            libc::SIGWINCH,
+            sigwinch_handler as *const () as libc::sighandler_t,
+        );
     }
 }
 
@@ -244,13 +248,7 @@ fn register_sigwinch_handler() {}
 #[cfg(unix)]
 fn read_stdin_byte(buf: &mut [u8; 1]) -> isize {
     // SAFETY: reading at most 1 byte into a valid 1-byte buffer.
-    unsafe {
-        libc::read(
-            libc::STDIN_FILENO,
-            buf.as_mut_ptr() as *mut libc::c_void,
-            1,
-        )
-    }
+    unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr() as *mut libc::c_void, 1) }
 }
 
 #[cfg(not(unix))]
@@ -279,17 +277,26 @@ pub struct AgentRow {
     pub agent_name: String,
     /// Display path: last 2 components of `project_dir` joined with `"/"`.
     pub project_display: String,
-    /// Full `project_dir` value used for DB queries.
+    /// Full `project_dir` value used for DB queries. Populated for
+    /// completeness/debugging; the rendered dashboard only shows
+    /// `project_display`.
+    #[allow(dead_code)]
     pub project_dir: String,
     /// Tokens saved today (since midnight UTC).
     pub tokens_saved_today: u64,
-    /// All-time tokens saved for this project.
+    /// All-time tokens saved for this project. Not currently rendered
+    /// per-row (see `VizitSnapshot::total_tokens_saved` for the
+    /// all-project total that IS shown).
+    #[allow(dead_code)]
     pub tokens_saved_total: u64,
     /// Overall compression ratio for this project (`0.0`–`1.0`, lower = better).
     pub compression_ratio: f64,
     /// Timestamp of the most recent compression event for this project.
     pub last_activity: DateTime<Utc>,
-    /// Number of compressions recorded today for this project.
+    /// Number of compressions recorded today for this project. Not
+    /// currently rendered per-row (see `VizitSnapshot::total_compressions`
+    /// for the all-project total that IS shown).
+    #[allow(dead_code)]
     pub compressions_today: u32,
 }
 
@@ -310,7 +317,9 @@ pub struct VizitSnapshot {
     pub captured_at: DateTime<Utc>,
     /// Terminal width (columns) at capture time.
     pub term_cols: u16,
-    /// Terminal height (rows) at capture time.
+    /// Terminal height (rows) at capture time. Captured for completeness
+    /// alongside `term_cols`; the renderer currently only needs the width.
+    #[allow(dead_code)]
     pub term_rows: u16,
 }
 
@@ -334,15 +343,10 @@ impl VizitDb {
             ));
         }
 
-        let flags =
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
 
-        let conn = Connection::open_with_flags(path, flags).map_err(|e| {
-            format!(
-                "[sqz vizit] cannot open database {}: {e}",
-                path.display()
-            )
-        })?;
+        let conn = Connection::open_with_flags(path, flags)
+            .map_err(|e| format!("[sqz vizit] cannot open database {}: {e}", path.display()))?;
 
         Ok(Self { conn })
     }
@@ -358,8 +362,7 @@ impl VizitDb {
             .map_err(|e| format!("[sqz vizit] failed to begin transaction: {e}"))?;
 
         let rows = self.fetch_agent_rows()?;
-        let (total_tokens_saved, total_compressions, overall_ratio) =
-            self.fetch_footer_totals()?;
+        let (total_tokens_saved, total_compressions, overall_ratio) = self.fetch_footer_totals()?;
 
         self.conn
             .execute_batch("COMMIT")
@@ -533,7 +536,11 @@ pub fn detect_agent_name(project_dir: &str) -> String {
     let stripped = component.trim_start_matches('.');
 
     // If stripping dots left nothing, use the original component (all dots)
-    let name = if stripped.is_empty() { component } else { stripped };
+    let name = if stripped.is_empty() {
+        component
+    } else {
+        stripped
+    };
 
     // Truncate to 24 chars (byte-safe: take char boundary)
     let truncated: String = name.chars().take(24).collect();
@@ -727,9 +734,8 @@ impl Renderer {
         let last_val = pad_right(&last_val, Self::W_LAST);
 
         // Assemble the row with box-drawing borders.
-        let row_str = format!(
-            "│ {agent_val} │ {project_val} │ {today_val} │ {ratio_val} │ {last_val} │"
-        );
+        let row_str =
+            format!("│ {agent_val} │ {project_val} │ {today_val} │ {ratio_val} │ {last_val} │");
 
         if color.is_empty() || !is_color_enabled() {
             row_str
@@ -837,9 +843,8 @@ impl Renderer {
         let ratio_hdr = pad_right("RATIO", Self::W_RATIO);
         let last_hdr = pad_right("LAST", Self::W_LAST);
 
-        let header = format!(
-            "│ {agent_hdr} │ {project_hdr} │ {today_hdr} │ {ratio_hdr} │ {last_hdr} │"
-        );
+        let header =
+            format!("│ {agent_hdr} │ {project_hdr} │ {today_hdr} │ {ratio_hdr} │ {last_hdr} │");
 
         if is_color_enabled() {
             format!("{BOLD}{header}{RESET}")
@@ -1022,7 +1027,7 @@ impl EventLoop {
                 if n > 0 {
                     match buf[0] {
                         b'q' | b'Q' | 0x03 => break 'outer, // q, Q, Ctrl-C
-                        b'r' | b'R' => break,                // manual refresh
+                        b'r' | b'R' => break,               // manual refresh
                         _ => {}
                     }
                 }
@@ -1097,10 +1102,7 @@ mod tests {
             format_project_display("/Users/bob/work/llm-agent"),
             "work/llm-agent"
         );
-        assert_eq!(
-            format_project_display("/home/alice/my-api"),
-            "alice/my-api"
-        );
+        assert_eq!(format_project_display("/home/alice/my-api"), "alice/my-api");
     }
 
     #[test]
@@ -1361,7 +1363,7 @@ mod tests {
     }
 
     fn arb_terminal_cols() -> impl Strategy<Value = u16> {
-        (40u16..=220u16)
+        40u16..=220u16
     }
 
     proptest! {

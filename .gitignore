@@ -1,7 +1,9 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is intentionally tracked: sqz/sqz-mcp are binary crates, so
+# committing the lockfile keeps builds reproducible (including offline
+# CI builds that rely on the cached, locked dependency graph).
 
 # IDE
 .idea/

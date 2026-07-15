@@ -174,7 +174,11 @@ fn build_rspec_summary(rspec: &RspecOutput) -> String {
         if let Some(exc) = &example.exception {
             let short_class = exc.class.rsplit("::").next().unwrap_or(&exc.class);
             let first_msg = exc.message.lines().next().unwrap_or("");
-            result.push_str(&format!("   {}: {}\n", short_class, truncate(first_msg, 120)));
+            result.push_str(&format!(
+                "   {}: {}\n",
+                short_class,
+                truncate(first_msg, 120)
+            ));
 
             for bt in &exc.backtrace {
                 if !bt.contains("/gems/") && !bt.contains("lib/rspec") {

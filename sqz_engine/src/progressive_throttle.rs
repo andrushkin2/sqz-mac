@@ -112,7 +112,6 @@ impl ProgressiveThrottler {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,9 +218,9 @@ mod tests {
             reduced_limit: 2,
         };
         let mut t = ProgressiveThrottler::new(config);
-        assert_eq!(t.record_call("t", 0), ThrottleLevel::Normal);   // call 1
-        assert_eq!(t.record_call("t", 0), ThrottleLevel::Reduced);  // call 2
-        assert_eq!(t.record_call("t", 0), ThrottleLevel::Blocked);  // call 3
+        assert_eq!(t.record_call("t", 0), ThrottleLevel::Normal); // call 1
+        assert_eq!(t.record_call("t", 0), ThrottleLevel::Reduced); // call 2
+        assert_eq!(t.record_call("t", 0), ThrottleLevel::Blocked); // call 3
     }
 
     #[test]

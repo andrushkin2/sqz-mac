@@ -559,7 +559,12 @@ fn css_extractor() -> RegexExtractor {
 fn typescript_extractor() -> RegexExtractor {
     RegexExtractor {
         import_patterns: vec!["import "],
-        function_patterns: vec!["function ", "async function ", "export function ", "export async function "],
+        function_patterns: vec![
+            "function ",
+            "async function ",
+            "export function ",
+            "export async function ",
+        ],
         class_patterns: vec!["class ", "interface ", "abstract class "],
         type_patterns: vec!["type ", "enum "],
     }
@@ -587,7 +592,13 @@ fn kotlin_extractor() -> RegexExtractor {
     RegexExtractor {
         import_patterns: vec!["import "],
         function_patterns: vec!["fun "],
-        class_patterns: vec!["class ", "interface ", "object ", "data class ", "sealed class "],
+        class_patterns: vec![
+            "class ",
+            "interface ",
+            "object ",
+            "data class ",
+            "sealed class ",
+        ],
         type_patterns: vec!["typealias "],
     }
 }
@@ -904,9 +915,9 @@ pub type MyAlias = Arc<ComplexStruct>;
         /// This ensures tokens_original >> tokens_summary.
         fn arb_rust_source() -> impl Strategy<Value = String> {
             (
-                1usize..=5,   // number of functions
-                1usize..=3,   // number of structs
-                5usize..=20,  // body lines per function (filler)
+                1usize..=5,  // number of functions
+                1usize..=3,  // number of structs
+                5usize..=20, // body lines per function (filler)
             )
                 .prop_map(|(n_fns, n_structs, body_lines)| {
                     let mut src = String::new();
@@ -925,9 +936,7 @@ pub type MyAlias = Arc<ComplexStruct>;
                             "pub fn my_function_{i}(x: i32, y: i32) -> i32 {{\n"
                         ));
                         for j in 0..body_lines {
-                            src.push_str(&format!(
-                                "    let _var_{j} = x + y + {j};\n"
-                            ));
+                            src.push_str(&format!("    let _var_{j} = x + y + {j};\n"));
                         }
                         src.push_str("    x + y\n");
                         src.push_str("}\n\n");
@@ -938,33 +947,28 @@ pub type MyAlias = Arc<ComplexStruct>;
 
         /// Generate a Python source file with N functions and M classes.
         fn arb_python_source() -> impl Strategy<Value = String> {
-            (
-                1usize..=5,
-                1usize..=3,
-                5usize..=20,
-            )
-                .prop_map(|(n_fns, n_classes, body_lines)| {
-                    let mut src = String::new();
-                    src.push_str("import os\nimport sys\nfrom typing import List, Dict\n\n");
+            (1usize..=5, 1usize..=3, 5usize..=20).prop_map(|(n_fns, n_classes, body_lines)| {
+                let mut src = String::new();
+                src.push_str("import os\nimport sys\nfrom typing import List, Dict\n\n");
 
-                    for i in 0..n_classes {
-                        src.push_str(&format!("class MyClass{i}:\n"));
-                        src.push_str("    def __init__(self):\n");
-                        for j in 0..body_lines {
-                            src.push_str(&format!("        self.field_{j} = {j}\n"));
-                        }
-                        src.push('\n');
+                for i in 0..n_classes {
+                    src.push_str(&format!("class MyClass{i}:\n"));
+                    src.push_str("    def __init__(self):\n");
+                    for j in 0..body_lines {
+                        src.push_str(&format!("        self.field_{j} = {j}\n"));
                     }
+                    src.push('\n');
+                }
 
-                    for i in 0..n_fns {
-                        src.push_str(&format!("def my_function_{i}(x, y):\n"));
-                        for j in 0..body_lines {
-                            src.push_str(&format!("    var_{j} = x + y + {j}\n"));
-                        }
-                        src.push_str("    return x + y\n\n");
+                for i in 0..n_fns {
+                    src.push_str(&format!("def my_function_{i}(x, y):\n"));
+                    for j in 0..body_lines {
+                        src.push_str(&format!("    var_{j} = x + y + {j}\n"));
                     }
-                    src
-                })
+                    src.push_str("    return x + y\n\n");
+                }
+                src
+            })
         }
 
         proptest! {

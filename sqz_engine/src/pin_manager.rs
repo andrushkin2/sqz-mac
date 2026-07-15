@@ -110,9 +110,11 @@ impl PinManager {
 #[cfg(test)]
 pub(crate) mod test_helpers {
     use super::*;
-    use crate::types::{BudgetState, ConversationTurn, CorrectionLog, ModelFamily, Role, SessionState};
-    use rusqlite::Connection;
     use crate::session_store::apply_schema;
+    use crate::types::{
+        BudgetState, ConversationTurn, CorrectionLog, ModelFamily, Role, SessionState,
+    };
+    use rusqlite::Connection;
 
     pub fn in_memory_store() -> SessionStore {
         let conn = Connection::open_in_memory().unwrap();
@@ -124,7 +126,11 @@ pub(crate) mod test_helpers {
         let now = chrono::Utc::now();
         let conversation = (0..num_turns)
             .map(|i| ConversationTurn {
-                role: if i % 2 == 0 { Role::User } else { Role::Assistant },
+                role: if i % 2 == 0 {
+                    Role::User
+                } else {
+                    Role::Assistant
+                },
                 content: format!("turn {i}"),
                 tokens: 10,
                 pinned: false,

@@ -41,7 +41,10 @@ fn main() {
     // Second read: cache hit — returns a ~13-token reference
     let second = cache.get_or_compress(path, content, &pipeline).unwrap();
     match &second {
-        CacheResult::Dedup { inline_ref, token_cost } => {
+        CacheResult::Dedup {
+            inline_ref,
+            token_cost,
+        } => {
             println!("Second read: HIT (dedup reference)");
             println!("  ref: {inline_ref}");
             println!("  tokens: {token_cost}");
@@ -59,7 +62,11 @@ fn main() {
             println!("Modified content: MISS (re-compressed)");
             println!("  tokens: {}", output.tokens_compressed);
         }
-        CacheResult::Delta { delta_text, token_cost, similarity } => {
+        CacheResult::Delta {
+            delta_text,
+            token_cost,
+            similarity,
+        } => {
             println!("Modified content: DELTA (near-duplicate)");
             println!("  similarity: {similarity:.2}");
             println!("  delta tokens: {token_cost}");

@@ -71,10 +71,7 @@ pub enum BudgetWarning {
         projected: f64,
     },
     /// Pinned tokens exceed 50 % of the agent's allocated budget.
-    PinnedExcessive {
-        agent: AgentId,
-        pinned_pct: f64,
-    },
+    PinnedExcessive { agent: AgentId, pinned_pct: f64 },
     /// Agent has exhausted its allocated budget.
     AgentBudgetExhausted { agent: AgentId },
 }

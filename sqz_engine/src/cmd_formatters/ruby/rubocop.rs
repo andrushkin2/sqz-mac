@@ -343,7 +343,10 @@ mod tests {
             compact_ruby_path("/project/spec/models/user_spec.rb"),
             "spec/models/user_spec.rb"
         );
-        assert_eq!(compact_ruby_path("lib/tasks/deploy.rake"), "lib/tasks/deploy.rake");
+        assert_eq!(
+            compact_ruby_path("lib/tasks/deploy.rake"),
+            "lib/tasks/deploy.rake"
+        );
     }
 
     #[test]

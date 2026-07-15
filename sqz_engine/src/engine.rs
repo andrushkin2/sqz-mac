@@ -50,7 +50,9 @@ impl SqzEngine {
     /// Create a new engine with the default preset and a persistent session store.
     ///
     /// Sessions are stored in `~/.sqz/sessions.db` for cross-session continuity.
-    /// Falls back to a temp-file store if the home directory is unavailable.
+    /// Falls back to a temp-file store if the home directory is unavailable
+    /// OR the database there can't actually be opened (see
+    /// [`Self::default_store_path`]).
     pub fn new() -> Result<Self> {
         let preset = Preset::default();
         let store_path = Self::default_store_path();
@@ -58,7 +60,24 @@ impl SqzEngine {
     }
 
     /// Resolve the default session store path: `~/.sqz/sessions.db`.
-    /// Falls back to a temp-file path if home dir is unavailable.
+    ///
+    /// Falls back to a temp-file path in two cases:
+    ///   1. The home directory (or `~/.sqz` within it) can't be created —
+    ///      the original fallback.
+    ///   2. `~/.sqz` exists and is writable, but the database file itself
+    ///      can't be opened — e.g. its permissions were changed out from
+    ///      under sqz, the volume is read-only, or disk space ran out.
+    ///      Previously only case 1 was handled: an inaccessible-but-
+    ///      present `sessions.db` made every session operation hard-fail
+    ///      with "unable to open database file" instead of degrading to
+    ///      a working (if non-persistent) session, because
+    ///      `SessionStore::open_or_create`'s corruption recovery just
+    ///      deletes and retries the *same* path — which doesn't help
+    ///      when the problem is permissions, not corruption.
+    ///
+    /// The probe below actually attempts to open the store before
+    /// committing to that path, so case 2 is caught here rather than
+    /// surfacing as a fatal error deeper in `with_preset_and_store`.
     fn default_store_path() -> std::path::PathBuf {
         if let Some(home) = dirs_next::home_dir() {
             let sqz_dir = home.join(".sqz");
@@ -68,15 +87,40 @@ impl SqzEngine {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(
-                        &sqz_dir,
-                        std::fs::Permissions::from_mode(0o700),
-                    );
+                    let _ =
+                        std::fs::set_permissions(&sqz_dir, std::fs::Permissions::from_mode(0o700));
                 }
-                return sqz_dir.join("sessions.db");
+                let candidate = sqz_dir.join("sessions.db");
+                return Self::probe_or_fallback(candidate);
             }
         }
-        // Fallback: temp dir with unique name
+        Self::temp_store_path()
+    }
+
+    /// Try to actually open `candidate` as a session store; if that fails,
+    /// fall back to a fresh temp-file path instead of propagating the
+    /// error. Split out from [`Self::default_store_path`] so the
+    /// probe-and-fallback behavior is unit-testable without touching the
+    /// real `$HOME`.
+    fn probe_or_fallback(candidate: std::path::PathBuf) -> std::path::PathBuf {
+        match SessionStore::open_or_create(&candidate) {
+            Ok(_) => candidate,
+            Err(e) => {
+                eprintln!(
+                    "sqz warning: cannot use session store at '{}' ({e}). \
+                     Falling back to a temporary database for this \
+                     session — history will not persist across runs.",
+                    candidate.display()
+                );
+                Self::temp_store_path()
+            }
+        }
+    }
+
+    /// A unique temp-file path for the session store, used when
+    /// `~/.sqz/sessions.db` is unavailable (missing home dir, unwritable
+    /// `~/.sqz`, or an inaccessible existing database).
+    fn temp_store_path() -> std::path::PathBuf {
         let dir = std::env::temp_dir();
         dir.join(format!(
             "sqz_session_{}_{}.db",
@@ -126,9 +170,13 @@ impl SqzEngine {
     /// 3. Verify invariants (error lines, JSON keys, diff hunks, etc.).
     /// 4. If verification confidence is low, fall back to safe mode and re-compress.
     pub fn compress(&self, input: &str) -> Result<CompressedContent> {
-        let preset = self.preset.lock()
+        let preset = self
+            .preset
+            .lock()
             .map_err(|_| SqzError::Other("preset lock poisoned".into()))?;
-        let pipeline = self.pipeline.lock()
+        let pipeline = self
+            .pipeline
+            .lock()
             .map_err(|_| SqzError::Other("pipeline lock poisoned".into()))?;
         let ctx = crate::pipeline::SessionContext {
             session_id: "engine".to_string(),
@@ -146,7 +194,10 @@ impl SqzEngine {
         // without opting in is an explicit `--mode aggressive` request,
         // which goes through `compress_with_mode` and never touches this
         // gate.
-        let mode = crate::confidence_router::gate_auto_mode(mode, crate::confidence_router::lossy_allowed());
+        let mode = crate::confidence_router::gate_auto_mode(
+            mode,
+            crate::confidence_router::lossy_allowed(),
+        );
 
         // Step 2: If Safe mode, skip aggressive pipeline and go straight to safe compress
         if mode == crate::confidence_router::CompressionMode::Safe {
@@ -194,18 +245,17 @@ impl SqzEngine {
     /// compression instead of the 92% dedup path advertised in the
     /// README.
     pub fn compress_with_cache(&self, input: &str) -> Result<crate::cache_manager::CacheResult> {
-        let pipeline = self.pipeline.lock()
+        let pipeline = self
+            .pipeline
+            .lock()
             .map_err(|_| SqzError::Other("pipeline lock poisoned".into()))?;
         // The `path` argument is informational only — cache keys are
         // SHA-256 of the content bytes, not the path. Pass an empty
         // path so we don't partition the cache by accidental file
         // location differences (e.g. `./src/main.rs` vs
         // `/abs/path/to/src/main.rs`).
-        self.cache_manager.get_or_compress(
-            std::path::Path::new(""),
-            input.as_bytes(),
-            &pipeline,
-        )
+        self.cache_manager
+            .get_or_compress(std::path::Path::new(""), input.as_bytes(), &pipeline)
     }
 
     /// Defensive compression: any input in, `CompressedContent` out, guaranteed.
@@ -219,7 +269,7 @@ impl SqzEngine {
         match self.compress(input) {
             Ok(result) => result,
             Err(_) => {
-                let tokens = (input.len() as u32 + 3) / 4;
+                let tokens = (input.len() as u32).div_ceil(4);
                 CompressedContent {
                     data: input.to_string(),
                     tokens_compressed: tokens,
@@ -251,10 +301,18 @@ impl SqzEngine {
     /// have picked. A low-confidence verifier result still falls back to
     /// safe mode regardless of the requested mode — that safety net stays
     /// on for every mode.
-    pub fn compress_with_mode(&self, input: &str, mode: crate::confidence_router::CompressionMode) -> Result<CompressedContent> {
-        let preset = self.preset.lock()
+    pub fn compress_with_mode(
+        &self,
+        input: &str,
+        mode: crate::confidence_router::CompressionMode,
+    ) -> Result<CompressedContent> {
+        let preset = self
+            .preset
+            .lock()
             .map_err(|_| SqzError::Other("preset lock poisoned".into()))?;
-        let pipeline = self.pipeline.lock()
+        let pipeline = self
+            .pipeline
+            .lock()
             .map_err(|_| SqzError::Other("pipeline lock poisoned".into()))?;
         let ctx = crate::pipeline::SessionContext {
             session_id: "engine".to_string(),
@@ -290,8 +348,8 @@ impl SqzEngine {
         ctx: &crate::pipeline::SessionContext,
     ) -> Result<CompressedContent> {
         use crate::preset::{
-            CompressionConfig, CondenseConfig, CustomTransformsConfig, BudgetConfig,
-            ModelConfig, PresetMeta, TerseModeConfig, TerseLevel, ToolSelectionConfig,
+            BudgetConfig, CompressionConfig, CondenseConfig, CustomTransformsConfig, ModelConfig,
+            PresetMeta, TerseLevel, TerseModeConfig, ToolSelectionConfig,
         };
 
         let safe_preset = Preset {
@@ -304,7 +362,10 @@ impl SqzEngine {
                 stages: vec!["condense".to_string()],
                 keep_fields: None,
                 strip_fields: None,
-                condense: Some(CondenseConfig { enabled: true, max_repeated_lines: 3 }),
+                condense: Some(CondenseConfig {
+                    enabled: true,
+                    max_repeated_lines: 3,
+                }),
                 git_diff_fold: None,
                 strip_nulls: None,
                 flatten: None,
@@ -323,7 +384,10 @@ impl SqzEngine {
                 default_window_size: 200_000,
                 agents: Default::default(),
             },
-            terse_mode: TerseModeConfig { enabled: false, level: TerseLevel::Moderate },
+            terse_mode: TerseModeConfig {
+                enabled: false,
+                level: TerseLevel::Moderate,
+            },
             model: ModelConfig {
                 family: "anthropic".to_string(),
                 primary: String::new(),
@@ -372,7 +436,13 @@ impl SqzEngine {
     }
 
     /// Pin a conversation turn.
-    pub fn pin(&self, session_id: &str, turn_index: usize, reason: &str, tokens: u32) -> Result<PinEntry> {
+    pub fn pin(
+        &self,
+        session_id: &str,
+        turn_index: usize,
+        reason: &str,
+        tokens: u32,
+    ) -> Result<PinEntry> {
         self.pin_manager.pin(session_id, turn_index, reason, tokens)
     }
 
@@ -492,11 +562,13 @@ impl SqzEngine {
 
     /// Route content to the appropriate compression mode based on entropy
     /// and risk pattern analysis.
-    pub fn route_compression_mode(&self, content: &str) -> crate::confidence_router::CompressionMode {
+    pub fn route_compression_mode(
+        &self,
+        content: &str,
+    ) -> crate::confidence_router::CompressionMode {
         self.confidence_router.route(content)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -531,6 +603,54 @@ mod tests {
     fn test_engine_new() {
         let engine = SqzEngine::new();
         assert!(engine.is_ok(), "SqzEngine::new() should succeed");
+    }
+
+    #[test]
+    fn test_probe_or_fallback_uses_temp_path_when_candidate_unopenable() {
+        // Regression test: an existing-but-inaccessible session store
+        // (permission denied, path is actually a directory, etc.) must
+        // fall back to a temp-file store instead of propagating a hard
+        // error. `open_or_create`'s corruption recovery deletes-and-
+        // retries the *same* path, which doesn't help here — a directory
+        // can't be removed with `remove_file`, so without a fallback this
+        // would have surfaced as "failed to create new session store".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let candidate = dir.path().join("sessions.db");
+        // Make the candidate a directory, not a file — SQLite can't open
+        // a directory as a database, and `remove_file` can't delete one,
+        // so `open_or_create`'s recovery path is guaranteed to fail too.
+        std::fs::create_dir(&candidate).expect("create dir standing in for the db file");
+
+        let resolved = SqzEngine::probe_or_fallback(candidate.clone());
+
+        assert_ne!(
+            resolved, candidate,
+            "must not resolve to the unopenable candidate path"
+        );
+        assert!(
+            resolved.starts_with(std::env::temp_dir()),
+            "must fall back to a path under the system temp dir, got: {}",
+            resolved.display()
+        );
+
+        // The fallback path itself must actually be usable.
+        assert!(
+            SessionStore::open_or_create(&resolved).is_ok(),
+            "the fallback path returned by probe_or_fallback must itself be openable"
+        );
+    }
+
+    #[test]
+    fn test_probe_or_fallback_keeps_candidate_when_openable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let candidate = dir.path().join("sessions.db");
+
+        let resolved = SqzEngine::probe_or_fallback(candidate.clone());
+
+        assert_eq!(
+            resolved, candidate,
+            "a perfectly openable candidate path should be used as-is"
+        );
     }
 
     #[test]
@@ -578,7 +698,10 @@ mod tests {
     fn test_compress_json_applies_toon() {
         let engine = SqzEngine::new().unwrap();
         let result = engine.compress(r#"{"name":"Alice","age":30}"#).unwrap();
-        assert!(result.data.starts_with("TOON:"), "JSON should be TOON-encoded");
+        assert!(
+            result.data.starts_with("TOON:"),
+            "JSON should be TOON-encoded"
+        );
     }
 
     /// Phase 5 regression: `engine.compress()` (the "auto" / default path
@@ -616,7 +739,12 @@ mod tests {
         );
 
         let result = engine.compress(&input).unwrap();
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "engine.compress() ran lossy stage {:?} without SQZ_ALLOW_LOSSY opt-in: {:?}",
@@ -624,7 +752,11 @@ mod tests {
                 result.stages_applied
             );
         }
-        assert!(!result.data.contains("[→L"), "dangling back-reference in output: {}", result.data);
+        assert!(
+            !result.data.contains("[→L"),
+            "dangling back-reference in output: {}",
+            result.data
+        );
     }
 
     /// Companion to `test_compress_auto_never_runs_lossy_without_opt_in`:
@@ -641,7 +773,10 @@ mod tests {
             input.push_str(&format!("000000000000000{}\n", i % 7));
         }
         let result = engine
-            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Aggressive)
+            .compress_with_mode(
+                &input,
+                crate::confidence_router::CompressionMode::Aggressive,
+            )
             .unwrap();
         assert!(
             result.stages_applied.iter().any(|s| {
@@ -673,14 +808,18 @@ mod tests {
         for input in fixtures {
             // Default pipeline (what every real command output goes through).
             let result = engine.compress(input);
-            assert!(result.is_ok(), "default pipeline panicked/errored on multi-byte input");
+            assert!(
+                result.is_ok(),
+                "default pipeline panicked/errored on multi-byte input"
+            );
 
             // Aggressive pipeline (exercises entropy_truncate's slicing paths).
-            let aggressive = engine.compress_with_mode(
-                input,
-                crate::confidence_router::CompressionMode::Aggressive,
+            let aggressive = engine
+                .compress_with_mode(input, crate::confidence_router::CompressionMode::Aggressive);
+            assert!(
+                aggressive.is_ok(),
+                "aggressive pipeline panicked/errored on multi-byte input"
             );
-            assert!(aggressive.is_ok(), "aggressive pipeline panicked/errored on multi-byte input");
         }
     }
 
@@ -801,7 +940,10 @@ complexity_threshold = 0.4
     fn repeated_line_fixture() -> String {
         let mut s = String::new();
         for i in 0..80 {
-            s.push_str(&format!("heartbeat check {} status ok all systems nominal\n", i % 3));
+            s.push_str(&format!(
+                "heartbeat check {} status ok all systems nominal\n",
+                i % 3
+            ));
         }
         s
     }
@@ -813,7 +955,12 @@ complexity_threshold = 0.4
         let result = engine
             .compress_with_mode(&input, crate::confidence_router::CompressionMode::Default)
             .unwrap();
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "Default mode ran lossy stage {:?}: {:?}",
@@ -830,7 +977,12 @@ complexity_threshold = 0.4
         let result = engine
             .compress_with_mode(&input, crate::confidence_router::CompressionMode::Safe)
             .unwrap();
-        for lossy in ["rle", "sliding_window_dedup", "entropy_truncate", "token_prune"] {
+        for lossy in [
+            "rle",
+            "sliding_window_dedup",
+            "entropy_truncate",
+            "token_prune",
+        ] {
             assert!(
                 !result.stages_applied.contains(&lossy.to_owned()),
                 "Safe mode ran lossy stage {:?}: {:?}",
@@ -865,11 +1017,17 @@ complexity_threshold = 0.4
         );
 
         let result = engine
-            .compress_with_mode(&input, crate::confidence_router::CompressionMode::Aggressive)
+            .compress_with_mode(
+                &input,
+                crate::confidence_router::CompressionMode::Aggressive,
+            )
             .unwrap();
         assert!(
             result.stages_applied.iter().any(|s| {
-                s == "rle" || s == "sliding_window_dedup" || s == "entropy_truncate" || s == "token_prune"
+                s == "rle"
+                    || s == "sliding_window_dedup"
+                    || s == "entropy_truncate"
+                    || s == "token_prune"
             }),
             "explicit Aggressive request should run the lossy subsystem even though \
              the confidence router would have picked {:?}, got stages: {:?}",

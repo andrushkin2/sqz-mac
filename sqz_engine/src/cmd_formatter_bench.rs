@@ -11,7 +11,7 @@ mod tests {
     use crate::cmd_formatters::format_command;
 
     fn tok(s: &str) -> usize {
-        (s.len() + 3) / 4
+        s.len().div_ceil(4)
     }
 
     /// Run a formatter, print the measured reduction, and gate on a floor.
@@ -34,7 +34,9 @@ mod tests {
             for i in 0..5 {
                 s.push_str(&format!("test suite{suite}::case_{i} ... ok\n"));
             }
-            s.push_str("test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n\n");
+            s.push_str(
+                "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n\n",
+            );
         }
         s
     }
@@ -76,13 +78,18 @@ mod tests {
          Changes not staged for commit:\n  (use \"git add <file>...\")\n\
          \tmodified:   src/d.rs\n\tmodified:   src/e.rs\n\tdeleted:    src/f.rs\n\n\
          Untracked files:\n  (use \"git add <file>...\")\n\
-         \tsrc/g.rs\n\tsrc/h.rs\n\tsrc/i.rs\n\tsrc/j.rs\n".to_string()
+         \tsrc/g.rs\n\tsrc/h.rs\n\tsrc/i.rs\n\tsrc/j.rs\n"
+            .to_string()
     }
 
     fn grep_100() -> String {
         let mut s = String::new();
         for i in 0..100 {
-            s.push_str(&format!("src/file{}.rs:{}:    let result = compute_value(input);\n", i % 5, i + 1));
+            s.push_str(&format!(
+                "src/file{}.rs:{}:    let result = compute_value(input);\n",
+                i % 5,
+                i + 1
+            ));
         }
         s
     }
@@ -98,27 +105,52 @@ mod tests {
 
     #[test]
     fn bench_cargo_test_all_pass() {
-        bench("cargo test (15 pass, 3 suites)", "cargo test", &cargo_test_15_pass(), 85.0);
+        bench(
+            "cargo test (15 pass, 3 suites)",
+            "cargo test",
+            &cargo_test_15_pass(),
+            85.0,
+        );
     }
 
     #[test]
     fn bench_cargo_build_success() {
-        bench("cargo build (success, 30 crates)", "cargo build", &cargo_build_success(), 80.0);
+        bench(
+            "cargo build (success, 30 crates)",
+            "cargo build",
+            &cargo_build_success(),
+            80.0,
+        );
     }
 
     #[test]
     fn bench_cargo_clippy_warnings() {
-        bench("cargo clippy (5 warnings)", "cargo clippy", &cargo_clippy_5_warn(), 50.0);
+        bench(
+            "cargo clippy (5 warnings)",
+            "cargo clippy",
+            &cargo_clippy_5_warn(),
+            50.0,
+        );
     }
 
     #[test]
     fn bench_npm_install() {
-        bench("npm install (200 packages)", "npm install", &npm_install_200(), 90.0);
+        bench(
+            "npm install (200 packages)",
+            "npm install",
+            &npm_install_200(),
+            90.0,
+        );
     }
 
     #[test]
     fn bench_git_status_verbose() {
-        bench("git status (10 files)", "git status", &git_status_10(), 40.0);
+        bench(
+            "git status (10 files)",
+            "git status",
+            &git_status_10(),
+            40.0,
+        );
     }
 
     #[test]
@@ -128,6 +160,11 @@ mod tests {
 
     #[test]
     fn bench_terraform_plan() {
-        bench("terraform plan (2 resources)", "terraform plan", &terraform_plan(), 40.0);
+        bench(
+            "terraform plan (2 resources)",
+            "terraform plan",
+            &terraform_plan(),
+            40.0,
+        );
     }
 }

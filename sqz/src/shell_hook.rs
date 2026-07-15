@@ -9,7 +9,6 @@
 /// session-pressure escalation and the confidence router's auto-classification
 /// both stay capped to Default/Safe under a plain hook install. Users who
 /// want automatic lossy compression set `SQZ_ALLOW_LOSSY=1` themselves.
-
 use std::path::{Path, PathBuf};
 
 // ── Hook script templates ─────────────────────────────────────────────────
@@ -121,14 +120,8 @@ impl ShellHook {
         match self {
             ShellHook::Bash => home.join(".bashrc"),
             ShellHook::Zsh => home.join(".zshrc"),
-            ShellHook::Fish => home
-                .join(".config")
-                .join("fish")
-                .join("config.fish"),
-            ShellHook::Nushell => home
-                .join(".config")
-                .join("nushell")
-                .join("config.nu"),
+            ShellHook::Fish => home.join(".config").join("fish").join("config.fish"),
+            ShellHook::Nushell => home.join(".config").join("nushell").join("config.nu"),
         }
     }
 
@@ -199,11 +192,7 @@ fn home_dir() -> PathBuf {
 }
 
 /// Append `script` to `path` unless `sentinel` is already present.
-pub fn install_hook_to_file(
-    path: &Path,
-    script: &str,
-    sentinel: &str,
-) -> Result<bool, HookError> {
+pub fn install_hook_to_file(path: &Path, script: &str, sentinel: &str) -> Result<bool, HookError> {
     // Read existing content (file may not exist yet).
     let existing = if path.exists() {
         std::fs::read_to_string(path).map_err(|e| HookError {
@@ -337,7 +326,11 @@ mod tests {
     fn test_install_writes_hook() {
         let dir = TempDir::new().unwrap();
         let rc = tmp_rc(&dir, ".bashrc");
-        let result = install_hook_to_file(&rc, BASH_HOOK, "# sqz — context intelligence layer (auto-installed)");
+        let result = install_hook_to_file(
+            &rc,
+            BASH_HOOK,
+            "# sqz — context intelligence layer (auto-installed)",
+        );
         assert!(result.unwrap());
         let content = fs::read_to_string(&rc).unwrap();
         assert!(content.contains("sqz compress"));
@@ -347,8 +340,18 @@ mod tests {
     fn test_install_idempotent() {
         let dir = TempDir::new().unwrap();
         let rc = tmp_rc(&dir, ".bashrc");
-        install_hook_to_file(&rc, BASH_HOOK, "# sqz — context intelligence layer (auto-installed)").unwrap();
-        let result = install_hook_to_file(&rc, BASH_HOOK, "# sqz — context intelligence layer (auto-installed)").unwrap();
+        install_hook_to_file(
+            &rc,
+            BASH_HOOK,
+            "# sqz — context intelligence layer (auto-installed)",
+        )
+        .unwrap();
+        let result = install_hook_to_file(
+            &rc,
+            BASH_HOOK,
+            "# sqz — context intelligence layer (auto-installed)",
+        )
+        .unwrap();
         assert!(!result, "second install should be a no-op");
     }
 
@@ -356,7 +359,12 @@ mod tests {
     fn test_install_creates_parent_dirs() {
         let dir = TempDir::new().unwrap();
         let rc = dir.path().join("nested").join("dir").join("config.fish");
-        install_hook_to_file(&rc, FISH_HOOK, "# sqz — context intelligence layer (auto-installed)").unwrap();
+        install_hook_to_file(
+            &rc,
+            FISH_HOOK,
+            "# sqz — context intelligence layer (auto-installed)",
+        )
+        .unwrap();
         assert!(rc.exists());
     }
 
@@ -378,7 +386,10 @@ mod tests {
 
     #[test]
     fn test_detect_nushell() {
-        assert_eq!(ShellHook::detect_from_str("/usr/bin/nu"), ShellHook::Nushell);
+        assert_eq!(
+            ShellHook::detect_from_str("/usr/bin/nu"),
+            ShellHook::Nushell
+        );
         assert_eq!(ShellHook::detect_from_str("nushell"), ShellHook::Nushell);
     }
 
@@ -416,23 +427,36 @@ mod tests {
         assert!(removed, "should return true when hook was removed");
 
         let content_after = fs::read_to_string(&rc).unwrap();
-        assert!(!content_after.contains(sentinel), "sentinel should be gone after uninstall");
+        assert!(
+            !content_after.contains(sentinel),
+            "sentinel should be gone after uninstall"
+        );
     }
 
     #[test]
     fn test_uninstall_nonexistent_is_noop() {
         let dir = TempDir::new().unwrap();
         let rc = tmp_rc(&dir, ".bashrc_nonexistent");
-        let result = uninstall_hook_from_file(&rc, "# sqz — context intelligence layer (auto-installed)");
-        assert!(!result.unwrap(), "uninstall on missing file should return false");
+        let result =
+            uninstall_hook_from_file(&rc, "# sqz — context intelligence layer (auto-installed)");
+        assert!(
+            !result.unwrap(),
+            "uninstall on missing file should return false"
+        );
     }
 
     #[test]
     fn test_uninstall_not_installed_is_noop() {
         let dir = TempDir::new().unwrap();
         let rc = tmp_rc(&dir, ".bashrc");
-        fs::write(&rc, "# some existing content\nexport PATH=$PATH:/usr/local/bin\n").unwrap();
-        let result = uninstall_hook_from_file(&rc, "# sqz — context intelligence layer (auto-installed)").unwrap();
+        fs::write(
+            &rc,
+            "# some existing content\nexport PATH=$PATH:/usr/local/bin\n",
+        )
+        .unwrap();
+        let result =
+            uninstall_hook_from_file(&rc, "# sqz — context intelligence layer (auto-installed)")
+                .unwrap();
         assert!(!result, "uninstall when not installed should return false");
         // Original content preserved
         let content = fs::read_to_string(&rc).unwrap();
@@ -470,9 +494,18 @@ mod tests {
         assert!(!after.contains(sentinel), "sentinel should be gone");
         assert!(!after.contains("sqz_run"), "hook body should be gone");
         // Critical: user content below the blank line MUST be preserved
-        assert!(after.contains("export PATH"), "user PATH config must survive: {after}");
-        assert!(after.contains("alias ll"), "user alias must survive: {after}");
-        assert!(after.contains("export EDITOR"), "user EDITOR config must survive: {after}");
+        assert!(
+            after.contains("export PATH"),
+            "user PATH config must survive: {after}"
+        );
+        assert!(
+            after.contains("alias ll"),
+            "user alias must survive: {after}"
+        );
+        assert!(
+            after.contains("export EDITOR"),
+            "user EDITOR config must survive: {after}"
+        );
     }
 
     #[test]
@@ -504,8 +537,14 @@ mod tests {
         assert!(!after.contains("sqz_run"));
         assert!(!after.contains("end of auto-installed"));
         // User content directly after end marker must be preserved
-        assert!(after.contains("export PATH"), "content after end marker must survive: {after}");
-        assert!(after.contains("export EDITOR"), "content before hook must survive: {after}");
+        assert!(
+            after.contains("export PATH"),
+            "content after end marker must survive: {after}"
+        );
+        assert!(
+            after.contains("export EDITOR"),
+            "content before hook must survive: {after}"
+        );
     }
 
     #[test]
@@ -520,6 +559,10 @@ mod tests {
         .map(|h| h.rc_path())
         .collect();
         let unique: std::collections::HashSet<_> = paths.iter().collect();
-        assert_eq!(unique.len(), paths.len(), "each shell must have a unique RC path");
+        assert_eq!(
+            unique.len(),
+            paths.len(),
+            "each shell must have a unique RC path"
+        );
     }
 }

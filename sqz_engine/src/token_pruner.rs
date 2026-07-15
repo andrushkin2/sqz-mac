@@ -7,7 +7,6 @@
 ///
 /// This module uses a built-in trigram frequency table derived from common
 /// code/prose patterns rather than shipping a large external asset.
-
 use std::collections::HashMap;
 
 use crate::error::Result;
@@ -267,7 +266,7 @@ impl TokenPruner {
 
         // Rank words by frequency (descending)
         let mut ranked: Vec<(String, usize)> = freq_map.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Compute expected Zipf frequency for each rank
         // f_expected(r) = C / r, where C = total_words / H_n (harmonic number)
@@ -276,16 +275,14 @@ impl TokenPruner {
         let c = words.len() as f64 / harmonic;
 
         // Mark words that are "Zipf-redundant": actual frequency >= 1.5× expected
-        let mut redundant_words: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut redundant_words: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for (rank_idx, (word, actual_freq)) in ranked.iter().enumerate() {
             let rank = rank_idx + 1;
             let expected = c / rank as f64;
             // Word is redundant if it appears much more than Zipf predicts
             // AND it's a common filler word (short, non-technical)
-            if *actual_freq as f64 > expected * 1.5
-                && word.len() <= 4
-                && !is_technical_word(word)
-            {
+            if *actual_freq as f64 > expected * 1.5 && word.len() <= 4 && !is_technical_word(word) {
                 redundant_words.insert(word.clone());
             }
         }
@@ -416,14 +413,60 @@ fn is_code_line(line: &str) -> bool {
 fn is_technical_word(word: &str) -> bool {
     matches!(
         word,
-        "null" | "none" | "true" | "false" | "void" | "self" | "this"
-        | "type" | "enum" | "impl" | "func" | "main" | "test" | "init"
-        | "open" | "read" | "send" | "recv" | "lock" | "drop" | "move"
-        | "copy" | "sync" | "push" | "pull" | "port" | "host" | "path"
-        | "file" | "line" | "code" | "data" | "node" | "root" | "hash"
-        | "size" | "name" | "list" | "loop" | "exit" | "fail" | "pass"
-        | "skip" | "todo" | "warn" | "info" | "http" | "json" | "yaml"
-        | "toml" | "html" | "rust" | "java" | "bash"
+        "null"
+            | "none"
+            | "true"
+            | "false"
+            | "void"
+            | "self"
+            | "this"
+            | "type"
+            | "enum"
+            | "impl"
+            | "func"
+            | "main"
+            | "test"
+            | "init"
+            | "open"
+            | "read"
+            | "send"
+            | "recv"
+            | "lock"
+            | "drop"
+            | "move"
+            | "copy"
+            | "sync"
+            | "push"
+            | "pull"
+            | "port"
+            | "host"
+            | "path"
+            | "file"
+            | "line"
+            | "code"
+            | "data"
+            | "node"
+            | "root"
+            | "hash"
+            | "size"
+            | "name"
+            | "list"
+            | "loop"
+            | "exit"
+            | "fail"
+            | "pass"
+            | "skip"
+            | "todo"
+            | "warn"
+            | "info"
+            | "http"
+            | "json"
+            | "yaml"
+            | "toml"
+            | "html"
+            | "rust"
+            | "java"
+            | "bash"
     )
 }
 
@@ -462,7 +505,8 @@ mod tests {
         // "in order to" is a highly predictable trigram — "to" should be pruned
         let result = pruner.prune("We need in order to do this task").unwrap();
         assert!(
-            result.tokens_removed > 0 || result.text.len() <= "We need in order to do this task".len(),
+            result.tokens_removed > 0
+                || result.text.len() <= "We need in order to do this task".len(),
             "expected some pruning on predictable prose"
         );
     }
@@ -536,7 +580,9 @@ mod tests {
         };
         let pruner = TokenPruner::with_config(config);
         // With lower threshold, more tokens should be pruned
-        let result = pruner.prune("this is a very long sentence with many words in order to test").unwrap();
+        let result = pruner
+            .prune("this is a very long sentence with many words in order to test")
+            .unwrap();
         // Just verify it doesn't crash
         assert!(!result.text.is_empty());
     }
@@ -590,10 +636,14 @@ mod tests {
     fn test_zipf_prune_removes_overrepresented_fillers() {
         let pruner = TokenPruner::new();
         // "the" appears way more than Zipf predicts for a text this size
-        let text = "the cat the dog the bird the fish the tree the rock the sky the sun the moon the star";
+        let text =
+            "the cat the dog the bird the fish the tree the rock the sky the sun the moon the star";
         let result = pruner.zipf_prune(text).unwrap();
         // Should remove some "the" occurrences but keep at least one
-        assert!(result.text.contains("the"), "should keep at least one 'the'");
+        assert!(
+            result.text.contains("the"),
+            "should keep at least one 'the'"
+        );
         assert!(
             result.tokens_removed > 0,
             "should prune overrepresented filler words"
@@ -606,7 +656,10 @@ mod tests {
         let text = "null null null null null null null null null null check for null values";
         let result = pruner.zipf_prune(text).unwrap();
         // "null" is a technical word — should NOT be pruned
-        assert_eq!(result.tokens_removed, 0, "technical words should be preserved");
+        assert_eq!(
+            result.tokens_removed, 0,
+            "technical words should be preserved"
+        );
     }
 
     #[test]

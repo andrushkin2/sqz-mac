@@ -43,7 +43,12 @@ pub struct SemanticNode {
 impl SemanticNode {
     /// Total tokens in this subtree (self + all descendants).
     pub fn total_tokens(&self) -> usize {
-        self.tokens + self.children.iter().map(|c| c.total_tokens()).sum::<usize>()
+        self.tokens
+            + self
+                .children
+                .iter()
+                .map(|c| c.total_tokens())
+                .sum::<usize>()
     }
 }
 
@@ -60,10 +65,7 @@ pub fn build_tree(text: &str) -> SemanticNode {
         .map(|section| build_section_node(&section, &word_freq))
         .collect();
 
-    let root_importance = children
-        .iter()
-        .map(|c| c.importance)
-        .fold(0.0f64, f64::max);
+    let root_importance = children.iter().map(|c| c.importance).fold(0.0f64, f64::max);
 
     SemanticNode {
         text: String::new(), // root has no direct text
@@ -230,8 +232,8 @@ fn build_paragraph_node(paragraph: &str, word_freq: &HashMap<String, usize>) -> 
         })
         .collect();
 
-    let importance = children.iter().map(|c| c.importance).sum::<f64>()
-        / children.len().max(1) as f64;
+    let importance =
+        children.iter().map(|c| c.importance).sum::<f64>() / children.len().max(1) as f64;
 
     SemanticNode {
         text: String::new(),

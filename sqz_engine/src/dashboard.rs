@@ -250,28 +250,27 @@ impl DashboardHtml {
     /// Render the full HTML page.  The page uses SSE to auto-refresh metrics
     /// from `/events` every 5 seconds.
     pub fn render(_port: u16) -> String {
-        format!(
-            r##"<!DOCTYPE html>
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sqz dashboard</title>
 <style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e1e4e8;padding:1.5rem}}
-h1{{font-size:1.4rem;margin-bottom:1rem;color:#58a6ff}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}}
-.card{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1rem}}
-.card .label{{font-size:.75rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}}
-.card .value{{font-size:1.6rem;font-weight:700;margin-top:.25rem}}
-.green{{color:#3fb950}} .blue{{color:#58a6ff}} .orange{{color:#d29922}} .red{{color:#f85149}}
-h2{{font-size:1.1rem;margin:1.2rem 0 .6rem;color:#c9d1d9}}
-table{{width:100%;border-collapse:collapse;margin-bottom:1rem}}
-th,td{{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #21262d;font-size:.85rem}}
-th{{color:#8b949e;font-weight:600}}
-#search{{background:#0d1117;border:1px solid #30363d;color:#e1e4e8;padding:.4rem .6rem;border-radius:4px;width:260px;margin-bottom:.6rem;font-size:.85rem}}
-.status{{font-size:.8rem;color:#8b949e;text-align:right;margin-top:1rem}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e1e4e8;padding:1.5rem}
+h1{font-size:1.4rem;margin-bottom:1rem;color:#58a6ff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1rem}
+.card .label{font-size:.75rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em}
+.card .value{font-size:1.6rem;font-weight:700;margin-top:.25rem}
+.green{color:#3fb950} .blue{color:#58a6ff} .orange{color:#d29922} .red{color:#f85149}
+h2{font-size:1.1rem;margin:1.2rem 0 .6rem;color:#c9d1d9}
+table{width:100%;border-collapse:collapse;margin-bottom:1rem}
+th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #21262d;font-size:.85rem}
+th{color:#8b949e;font-weight:600}
+#search{background:#0d1117;border:1px solid #30363d;color:#e1e4e8;padding:.4rem .6rem;border-radius:4px;width:260px;margin-bottom:.6rem;font-size:.85rem}
+.status{font-size:.8rem;color:#8b949e;text-align:right;margin-top:1rem}
 </style>
 </head>
 <body>
@@ -308,23 +307,23 @@ th{{color:#8b949e;font-weight:600}}
 <div class="status" id="status">Connecting…</div>
 
 <script>
-(function(){{
+(function(){
   var es=new EventSource('/events');
   var statusEl=document.getElementById('status');
   var searchEl=document.getElementById('search');
   var lastData=null;
 
-  es.onmessage=function(e){{
+  es.onmessage=function(e){
     var d=JSON.parse(e.data);
     lastData=d;
     render(d);
     statusEl.textContent='Updated '+new Date().toLocaleTimeString();
-  }};
-  es.onerror=function(){{statusEl.textContent='Disconnected — retrying…';}};
+  };
+  es.onerror=function(){statusEl.textContent='Disconnected — retrying…';};
 
-  searchEl.addEventListener('input',function(){{if(lastData)renderSessions(lastData.sessions);}});
+  searchEl.addEventListener('input',function(){if(lastData)renderSessions(lastData.sessions);});
 
-  function render(d){{
+  function render(d){
     document.getElementById('m-saved').textContent=fmt(d.tokens_saved);
     document.getElementById('m-ratio').textContent=(d.compression_ratio*100).toFixed(1)+'%';
     document.getElementById('m-cache').textContent=d.cache_hit_rate.toFixed(1)+'%';
@@ -335,49 +334,47 @@ th{{color:#8b949e;font-weight:600}}
     budgetEl.textContent=bp.toFixed(1)+'%';
     budgetEl.className='value '+(bp>85?'red':bp>70?'orange':'green');
 
-    renderTable('tool-table',d.per_tool,function(t){{
+    renderTable('tool-table',d.per_tool,function(t){
       return '<td>'+esc(t.tool_name)+'</td><td>'+fmt(t.tokens_input)+'</td><td>'+fmt(t.tokens_output)+'</td><td>$'+t.cost_usd.toFixed(4)+'</td><td>'+t.call_count+'</td>';
-    }});
-    renderTable('cmd-table',d.per_command,function(c){{
+    });
+    renderTable('cmd-table',d.per_command,function(c){
       var r=c.tokens_original?((c.tokens_compressed/c.tokens_original)*100).toFixed(1)+'%':'—';
       return '<td>'+esc(c.command)+'</td><td>'+fmt(c.tokens_original)+'</td><td>'+fmt(c.tokens_compressed)+'</td><td>'+r+'</td><td>'+c.invocations+'</td>';
-    }});
+    });
     renderSessions(d.sessions);
-  }}
+  }
 
-  function renderSessions(sessions){{
+  function renderSessions(sessions){
     var q=(searchEl.value||'').toLowerCase();
-    var filtered=sessions.filter(function(s){{
+    var filtered=sessions.filter(function(s){
       if(!q)return true;
       return (s.id+s.project_dir+s.summary).toLowerCase().indexOf(q)>=0;
-    }});
-    renderTable('sess-table',filtered,function(s){{
+    });
+    renderTable('sess-table',filtered,function(s){
       return '<td>'+esc(s.id)+'</td><td>'+esc(s.project_dir)+'</td><td>'+esc(s.summary)+'</td><td>'+new Date(s.created_at).toLocaleDateString()+'</td><td>'+fmt(s.total_tokens)+'</td><td>$'+s.cost_usd.toFixed(4)+'</td>';
-    }});
-  }}
+    });
+  }
 
-  function renderTable(id,rows,rowFn){{
+  function renderTable(id,rows,rowFn){
     var tb=document.getElementById(id).querySelector('tbody');
-    tb.innerHTML=rows.map(function(r){{return '<tr>'+rowFn(r)+'</tr>';}}).join('');
-  }}
+    tb.innerHTML=rows.map(function(r){return '<tr>'+rowFn(r)+'</tr>';}).join('');
+  }
 
-  function fmt(n){{
+  function fmt(n){
     if(n>=1e6)return (n/1e6).toFixed(1)+'M';
     if(n>=1e3)return (n/1e3).toFixed(1)+'K';
     return ''+n;
-  }}
+  }
 
-  function esc(s){{
+  function esc(s){
     var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;
-  }}
-}})();
+  }
+})();
 </script>
 </body>
-</html>"##,
-        )
+</html>"##.to_string()
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Dashboard server (minimal TCP-based)
@@ -422,7 +419,7 @@ impl DashboardServer {
     /// then either:
     /// - `GET /`        → responds with the full HTML page
     /// - `GET /events`  → responds with an SSE stream (pushes metrics JSON
-    ///                     every 5 seconds until the client disconnects)
+    ///   every 5 seconds until the client disconnects)
     /// - anything else  → 404
     pub fn run(&self) -> crate::error::Result<()> {
         let addr = format!("127.0.0.1:{}", self.config.port);
@@ -487,9 +484,7 @@ impl DashboardServer {
                     }
                     std::thread::sleep(Duration::from_secs(5));
                 }
-            } else if request_line.starts_with("GET / ")
-                || request_line.starts_with("GET / HTTP")
-            {
+            } else if request_line.starts_with("GET / ") || request_line.starts_with("GET / HTTP") {
                 // Serve HTML
                 let response = format!(
                     "HTTP/1.1 200 OK\r\n\
@@ -551,17 +546,21 @@ mod tests {
 
     #[test]
     fn test_cache_hit_rate_calculation() {
-        let mut m = DashboardMetrics::default();
-        m.cache_hits = 75;
-        m.cache_misses = 25;
+        let m = DashboardMetrics {
+            cache_hits: 75,
+            cache_misses: 25,
+            ..Default::default()
+        };
         assert!((m.cache_hit_rate() - 75.0).abs() < 0.01);
     }
 
     #[test]
     fn test_cache_hit_rate_all_hits() {
-        let mut m = DashboardMetrics::default();
-        m.cache_hits = 100;
-        m.cache_misses = 0;
+        let m = DashboardMetrics {
+            cache_hits: 100,
+            cache_misses: 0,
+            ..Default::default()
+        };
         assert!((m.cache_hit_rate() - 100.0).abs() < f64::EPSILON);
     }
 
@@ -584,10 +583,12 @@ mod tests {
 
     #[test]
     fn test_to_json_with_data() {
-        let mut m = DashboardMetrics::default();
-        m.tokens_saved = 50_000;
-        m.compression_ratio = 0.35;
-        m.active_session_id = Some("sess_123".to_string());
+        let mut m = DashboardMetrics {
+            tokens_saved: 50_000,
+            compression_ratio: 0.35,
+            active_session_id: Some("sess_123".to_string()),
+            ..Default::default()
+        };
         m.per_tool.push(ToolBreakdown {
             tool_name: "read_file".to_string(),
             tokens_input: 1000,

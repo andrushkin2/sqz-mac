@@ -167,7 +167,13 @@ fn fts5_task_filter(source: &str, intent: &str) -> Result<String> {
     // Sanitize intent for FTS5 query
     let sanitized: String = intent
         .chars()
-        .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c.is_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
     let terms: Vec<&str> = sanitized.split_whitespace().collect();
     if terms.is_empty() {
@@ -302,9 +308,7 @@ impl FileReader {
             FileReadMode::Aggressive => self.read_aggressive(path, source, tokens_original),
             FileReadMode::Entropy => self.read_entropy(source, tokens_original),
             FileReadMode::Task => self.read_task(source, intent, tokens_original),
-            FileReadMode::Lines(range) => {
-                self.read_lines(source, range.clone(), tokens_original)
-            }
+            FileReadMode::Lines(range) => self.read_lines(source, range.clone(), tokens_original),
         }
     }
 
@@ -507,8 +511,8 @@ impl FileReader {
         for &line_idx in &changed_lines {
             let start = line_idx.saturating_sub(ctx);
             let end = (line_idx + ctx + 1).min(new_lines.len());
-            for j in start..end {
-                included[j] = true;
+            for slot in included.iter_mut().take(end).skip(start) {
+                *slot = true;
             }
         }
 
@@ -520,11 +524,7 @@ impl FileReader {
                     output.push(format!("@@ line {} @@", i + 1));
                     in_range = true;
                 }
-                let marker = if changed_lines.contains(&i) {
-                    ">"
-                } else {
-                    " "
-                };
+                let marker = if changed_lines.contains(&i) { ">" } else { " " };
                 output.push(format!("{marker} {line}"));
             } else {
                 in_range = false;
@@ -568,7 +568,11 @@ impl FileReader {
         // Then entropy filter on the original source
         let blocks = compute_block_entropies(source);
         let high = filter_high_entropy(&blocks, self.entropy_percentile);
-        let entropy_content: String = high.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+        let entropy_content: String = high
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
         // Combine: prefer signatures if available, append high-entropy blocks
         // that aren't already covered
@@ -706,9 +710,9 @@ impl FileReader {
 
         let mut output = Vec::new();
         output.push(format!("// lines {}-{} (of {})", start + 1, end, total));
-        for i in ctx_start..ctx_end {
+        for (i, line) in lines.iter().enumerate().take(ctx_end).skip(ctx_start) {
             let marker = if i >= start && i < end { ">" } else { " " };
-            output.push(format!("{marker} {:4} | {}", i + 1, lines[i]));
+            output.push(format!("{marker} {:4} | {}", i + 1, line));
         }
 
         let content = output.join("\n");
@@ -841,7 +845,13 @@ fn internal_helper() -> i32 {
         let reader = FileReader::new();
         let source = "hello world\nline two\n";
         let result = reader
-            .read(Path::new("test.txt"), source, &FileReadMode::Full, None, None)
+            .read(
+                Path::new("test.txt"),
+                source,
+                &FileReadMode::Full,
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(result.content, source);
         assert_eq!(result.mode, "full");
@@ -853,13 +863,7 @@ fn internal_helper() -> i32 {
         let reader = FileReader::new();
         let source = &large_source(300);
         let result = reader
-            .read(
-                Path::new("test.rs"),
-                source,
-                &FileReadMode::Map,
-                None,
-                None,
-            )
+            .read(Path::new("test.rs"), source, &FileReadMode::Map, None, None)
             .unwrap();
         assert_eq!(result.mode, "map");
         // Map mode should produce ≤50 tokens for a ~300-line file
@@ -1048,7 +1052,8 @@ fn logging_middleware(req: Request) -> Request {
     #[test]
     fn test_lines_mode_extracts_range() {
         let reader = FileReader::new();
-        let source = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
+        let source =
+            "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
         let result = reader
             .read(
                 Path::new("test.txt"),
@@ -1124,8 +1129,14 @@ fn logging_middleware(req: Request) -> Request {
     fn test_detect_language() {
         assert_eq!(detect_language(Path::new("foo.rs")), Some("rust".into()));
         assert_eq!(detect_language(Path::new("bar.py")), Some("python".into()));
-        assert_eq!(detect_language(Path::new("baz.js")), Some("javascript".into()));
-        assert_eq!(detect_language(Path::new("qux.ts")), Some("typescript".into()));
+        assert_eq!(
+            detect_language(Path::new("baz.js")),
+            Some("javascript".into())
+        );
+        assert_eq!(
+            detect_language(Path::new("qux.ts")),
+            Some("typescript".into())
+        );
         assert_eq!(detect_language(Path::new("no_ext")), None);
     }
 

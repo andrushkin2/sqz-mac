@@ -111,7 +111,7 @@ impl CtxFormat {
 mod tests {
     use super::*;
     use crate::types::{
-        BudgetState, CorrectionEntry, CorrectionLog, ConversationTurn, Learning, ModelFamily,
+        BudgetState, ConversationTurn, CorrectionEntry, CorrectionLog, Learning, ModelFamily,
         PinEntry, Role, SessionState,
     };
     use chrono::Utc;
@@ -136,15 +136,19 @@ mod tests {
     }
 
     fn arb_conversation_turn() -> impl Strategy<Value = ConversationTurn> {
-        (arb_role(), "[a-zA-Z0-9 .,!?]{0,80}", 0u32..5000u32, any::<bool>()).prop_map(
-            |(role, content, tokens, pinned)| ConversationTurn {
+        (
+            arb_role(),
+            "[a-zA-Z0-9 .,!?]{0,80}",
+            0u32..5000u32,
+            any::<bool>(),
+        )
+            .prop_map(|(role, content, tokens, pinned)| ConversationTurn {
                 role,
                 content,
                 tokens,
                 pinned,
                 timestamp: Utc::now(),
-            },
-        )
+            })
     }
 
     fn arb_pin_entry() -> impl Strategy<Value = PinEntry> {
@@ -158,16 +162,13 @@ mod tests {
     }
 
     fn arb_learning() -> impl Strategy<Value = Learning> {
-        (
-            "[a-zA-Z_]{1,20}",
-            "[a-zA-Z0-9 ]{0,60}",
-            0usize..10usize,
-        )
-            .prop_map(|(key, value, source_turn)| Learning {
+        ("[a-zA-Z_]{1,20}", "[a-zA-Z0-9 ]{0,60}", 0usize..10usize).prop_map(
+            |(key, value, source_turn)| Learning {
                 key,
                 value,
                 source_turn,
-            })
+            },
+        )
     }
 
     fn arb_correction_entry() -> impl Strategy<Value = CorrectionEntry> {
@@ -188,7 +189,7 @@ mod tests {
 
     fn arb_session_state() -> impl Strategy<Value = SessionState> {
         (
-            "[a-zA-Z0-9]{8,16}",                          // id
+            "[a-zA-Z0-9]{8,16}", // id
             prop::collection::vec(arb_conversation_turn(), 0..5),
             prop::collection::vec(arb_pin_entry(), 0..3),
             prop::collection::vec(arb_learning(), 0..3),
@@ -466,7 +467,11 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("line"), "error should mention line: {}", msg);
-        assert!(msg.contains("column"), "error should mention column: {}", msg);
+        assert!(
+            msg.contains("column"),
+            "error should mention column: {}",
+            msg
+        );
     }
 
     #[test]

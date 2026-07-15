@@ -191,7 +191,10 @@ fn format_cargo_test(output: &str) -> String {
             }
             return summary_lines.join("\n");
         }
-        let total = output.lines().filter(|l| l.contains("... ok") || l.contains("passed")).count();
+        let total = output
+            .lines()
+            .filter(|l| l.contains("... ok") || l.contains("passed"))
+            .count();
         if total > 0 {
             return format!("ok: {} tests passed", total);
         }
@@ -214,7 +217,10 @@ fn format_cargo_test(output: &str) -> String {
         result.push(f.clone());
     }
     if failures.len() > CAP_WARNINGS {
-        result.push(format!("...+{} more failures", failures.len() - CAP_WARNINGS));
+        result.push(format!(
+            "...+{} more failures",
+            failures.len() - CAP_WARNINGS
+        ));
     }
     if !summary_lines.is_empty() {
         result.push(summary_lines.last().unwrap().clone());
@@ -270,7 +276,8 @@ fn extract_number_before(text: &str, word: &str) -> Option<usize> {
     let pos = text.find(word)?;
     let before = text[..pos].trim();
     // Get the last whitespace-separated token before the word
-    before.rsplit_once(|c: char| !c.is_ascii_digit())
+    before
+        .rsplit_once(|c: char| !c.is_ascii_digit())
         .map(|(_, n)| n)
         .unwrap_or(before)
         .parse()
@@ -278,7 +285,8 @@ fn extract_number_before(text: &str, word: &str) -> Option<usize> {
 }
 
 fn format_cargo_clippy(output: &str) -> String {
-    let mut by_rule: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_rule: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     let mut error_blocks: Vec<Vec<String>> = Vec::new();
     let mut warning_count = 0;
     let mut current_block: Vec<String> = Vec::new();
@@ -310,11 +318,14 @@ fn format_cargo_clippy(output: &str) -> String {
             in_error = false;
 
             // Extract rule name from brackets
-            current_rule = extract_bracket_content(line)
-                .unwrap_or_else(|| {
-                    let prefix = if is_error_line { "error: " } else { "warning: " };
-                    line.strip_prefix(prefix).unwrap_or(line).to_string()
-                });
+            current_rule = extract_bracket_content(line).unwrap_or_else(|| {
+                let prefix = if is_error_line {
+                    "error: "
+                } else {
+                    "warning: "
+                };
+                line.strip_prefix(prefix).unwrap_or(line).to_string()
+            });
 
             if is_error_line {
                 in_error = true;
@@ -323,9 +334,16 @@ fn format_cargo_clippy(output: &str) -> String {
                 warning_count += 1;
             }
         } else if line.trim_start().starts_with("--> ") {
-            let location = line.trim_start().strip_prefix("--> ").unwrap_or(line).to_string();
+            let location = line
+                .trim_start()
+                .strip_prefix("--> ")
+                .unwrap_or(line)
+                .to_string();
             if !current_rule.is_empty() {
-                by_rule.entry(current_rule.clone()).or_default().push(location);
+                by_rule
+                    .entry(current_rule.clone())
+                    .or_default()
+                    .push(location);
             }
             if in_error {
                 current_block.push(line.to_string());
@@ -350,7 +368,10 @@ fn format_cargo_clippy(output: &str) -> String {
         return "ok: no issues".to_string();
     }
 
-    let mut result = format!("cargo clippy: {} errors, {} warnings\n", error_count, warning_count);
+    let mut result = format!(
+        "cargo clippy: {} errors, {} warnings\n",
+        error_count, warning_count
+    );
 
     if !error_blocks.is_empty() {
         for blk in error_blocks.iter().take(CAP_ERRORS) {
@@ -358,13 +379,16 @@ fn format_cargo_clippy(output: &str) -> String {
             result.push('\n');
         }
         if error_blocks.len() > CAP_ERRORS {
-            result.push_str(&format!("...+{} more errors\n", error_blocks.len() - CAP_ERRORS));
+            result.push_str(&format!(
+                "...+{} more errors\n",
+                error_blocks.len() - CAP_ERRORS
+            ));
         }
     }
 
     // Sort warnings by frequency
     let mut rule_counts: Vec<_> = by_rule.iter().collect();
-    rule_counts.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    rule_counts.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
 
     for (rule, locations) in rule_counts.iter().take(CAP_WARNINGS) {
         result.push_str(&format!("  {} ({}x)\n", rule, locations.len()));
@@ -376,7 +400,10 @@ fn format_cargo_clippy(output: &str) -> String {
         }
     }
     if rule_counts.len() > CAP_WARNINGS {
-        result.push_str(&format!("...+{} more rules\n", rule_counts.len() - CAP_WARNINGS));
+        result.push_str(&format!(
+            "...+{} more rules\n",
+            rule_counts.len() - CAP_WARNINGS
+        ));
     }
 
     result.trim().to_string()

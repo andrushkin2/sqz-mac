@@ -135,7 +135,9 @@ mod tests {
     fn anthropic_no_cache_control_returns_none() {
         let detector = PromptCacheDetector;
         let messages = vec![msg("user", "hello"), msg("assistant", "world")];
-        assert!(detector.detect_boundary(&messages, Provider::Anthropic).is_none());
+        assert!(detector
+            .detect_boundary(&messages, Provider::Anthropic)
+            .is_none());
     }
 
     #[test]
@@ -155,10 +157,10 @@ mod tests {
         let detector = PromptCacheDetector;
         // Two cached messages; boundary should be after the second one.
         let messages = vec![
-            cached_msg("user", "first"),   // offset 5
-            msg("assistant", "middle"),    // offset 5+6=11
-            cached_msg("user", "second"),  // offset 11+6=17
-            msg("assistant", "tail"),      // offset 17+4=21
+            cached_msg("user", "first"),  // offset 5
+            msg("assistant", "middle"),   // offset 5+6=11
+            cached_msg("user", "second"), // offset 11+6=17
+            msg("assistant", "tail"),     // offset 17+4=21
         ];
         let boundary = detector
             .detect_boundary(&messages, Provider::Anthropic)
@@ -171,8 +173,8 @@ mod tests {
     fn anthropic_only_first_message_cached() {
         let detector = PromptCacheDetector;
         let messages = vec![
-            cached_msg("system", "sys"),  // offset 3
-            msg("user", "query"),         // offset 3+5=8
+            cached_msg("system", "sys"), // offset 3
+            msg("user", "query"),        // offset 3+5=8
         ];
         let boundary = detector
             .detect_boundary(&messages, Provider::Anthropic)
@@ -188,7 +190,9 @@ mod tests {
     fn openai_short_content_returns_none() {
         let detector = PromptCacheDetector;
         let messages = vec![msg("user", "short")];
-        assert!(detector.detect_boundary(&messages, Provider::OpenAI).is_none());
+        assert!(detector
+            .detect_boundary(&messages, Provider::OpenAI)
+            .is_none());
     }
 
     #[test]
@@ -210,7 +214,9 @@ mod tests {
         let content = "x".repeat(4096);
         let messages = vec![msg("user", &content)];
         // total_len == 4096, not > 4096, so no boundary
-        assert!(detector.detect_boundary(&messages, Provider::OpenAI).is_none());
+        assert!(detector
+            .detect_boundary(&messages, Provider::OpenAI)
+            .is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -221,7 +227,9 @@ mod tests {
     fn google_always_returns_none() {
         let detector = PromptCacheDetector;
         let messages = vec![cached_msg("user", "x".repeat(10000).as_str())];
-        assert!(detector.detect_boundary(&messages, Provider::Google).is_none());
+        assert!(detector
+            .detect_boundary(&messages, Provider::Google)
+            .is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -294,31 +302,32 @@ mod tests {
     /// cache_control marker (Anthropic format).
     fn anthropic_messages_with_boundary() -> impl Strategy<Value = Vec<Message>> {
         // Generate 1-8 messages; at least one will be marked as cached.
-        (1usize..=8usize).prop_flat_map(|n| {
-            // For each message, generate content and whether it's cached.
-            let msg_strategy = (
-                prop_oneof![Just("user"), Just("assistant"), Just("system")],
-                "[a-z]{1,50}",
-                any::<bool>(),
-            );
-            prop::collection::vec(msg_strategy, n).prop_filter(
-                "at least one cached message",
-                |msgs| msgs.iter().any(|(_, _, cached)| *cached),
-            )
-        })
-        .prop_map(|msgs| {
-            msgs.into_iter()
-                .map(|(role, content, cached)| Message {
-                    role: role.to_owned(),
-                    content,
-                    cache_control: if cached {
-                        Some("ephemeral".to_owned())
-                    } else {
-                        None
-                    },
-                })
-                .collect()
-        })
+        (1usize..=8usize)
+            .prop_flat_map(|n| {
+                // For each message, generate content and whether it's cached.
+                let msg_strategy = (
+                    prop_oneof![Just("user"), Just("assistant"), Just("system")],
+                    "[a-z]{1,50}",
+                    any::<bool>(),
+                );
+                prop::collection::vec(msg_strategy, n)
+                    .prop_filter("at least one cached message", |msgs| {
+                        msgs.iter().any(|(_, _, cached)| *cached)
+                    })
+            })
+            .prop_map(|msgs| {
+                msgs.into_iter()
+                    .map(|(role, content, cached)| Message {
+                        role: role.to_owned(),
+                        content,
+                        cache_control: if cached {
+                            Some("ephemeral".to_owned())
+                        } else {
+                            None
+                        },
+                    })
+                    .collect()
+            })
     }
 
     proptest! {

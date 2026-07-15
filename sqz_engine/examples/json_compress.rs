@@ -29,7 +29,8 @@ fn main() {
     println!("=== JSON → TOON ===");
     println!("input length:  {} chars", json_input.len());
     println!("output length: {} chars", result.data.len());
-    println!("tokens: {} → {} ({:.0}% reduction)",
+    println!(
+        "tokens: {} → {} ({:.0}% reduction)",
         result.tokens_original,
         result.tokens_compressed,
         (1.0 - result.compression_ratio) * 100.0,

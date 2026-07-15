@@ -16,9 +16,9 @@
 //! assert!(!encoded.is_empty());
 //! ```
 
-use tree_sitter::{Language, Parser, Node};
 use crate::error::{Result, SqzError};
 use crate::str_utils::safe_truncate;
+use tree_sitter::{Language, Node, Parser};
 
 /// A single change in the AST delta.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,10 +311,7 @@ mod tests {
             "changed function body should produce changes"
         );
         // Should detect the integer literal change
-        let has_modified = delta
-            .changes
-            .iter()
-            .any(|c| c.kind == ChangeKind::Modified);
+        let has_modified = delta.changes.iter().any(|c| c.kind == ChangeKind::Modified);
         assert!(has_modified, "should have a Modified change");
     }
 

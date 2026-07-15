@@ -34,9 +34,12 @@ fn format_aws_json(output: &str) -> String {
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(output) {
         if let Some(arr) = val.as_array() {
             if arr.len() > CAP_LIST {
-                return format!("[{} items, showing first {}]\n{}",
-                    arr.len(), CAP_LIST,
-                    serde_json::to_string(&arr[..CAP_LIST]).unwrap_or_default());
+                return format!(
+                    "[{} items, showing first {}]\n{}",
+                    arr.len(),
+                    CAP_LIST,
+                    serde_json::to_string(&arr[..CAP_LIST]).unwrap_or_default()
+                );
             }
         }
         // For objects with large nested arrays, summarize
@@ -44,8 +47,12 @@ fn format_aws_json(output: &str) -> String {
             for (key, value) in obj {
                 if let Some(arr) = value.as_array() {
                     if arr.len() > CAP_LIST {
-                        return format!("{{\"{}\": [{} items, first {} shown], ...}}",
-                            key, arr.len(), CAP_LIST);
+                        return format!(
+                            "{{\"{}\": [{} items, first {} shown], ...}}",
+                            key,
+                            arr.len(),
+                            CAP_LIST
+                        );
                     }
                 }
             }
@@ -60,10 +67,12 @@ fn format_aws_s3(output: &str) -> String {
     if lines.len() <= CAP_LIST {
         return output.to_string();
     }
-    format!("{} objects:\n{}\n...+{} more",
+    format!(
+        "{} objects:\n{}\n...+{} more",
         lines.len(),
         lines[..CAP_LIST].join("\n"),
-        lines.len() - CAP_LIST)
+        lines.len() - CAP_LIST
+    )
 }
 
 fn format_tf_plan(output: &str) -> String {
@@ -74,12 +83,18 @@ fn format_tf_plan(output: &str) -> String {
 
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("# ") || trimmed.starts_with("+ ") || trimmed.starts_with("~ ") || trimmed.starts_with("- ") {
-            if trimmed.starts_with("# ") {
-                resources.push(trimmed.to_string());
-            }
+        if (trimmed.starts_with("# ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("~ ")
+            || trimmed.starts_with("- "))
+            && trimmed.starts_with("# ")
+        {
+            resources.push(trimmed.to_string());
         }
-        if trimmed.contains("to add") && trimmed.contains("to change") && trimmed.contains("to destroy") {
+        if trimmed.contains("to add")
+            && trimmed.contains("to change")
+            && trimmed.contains("to destroy")
+        {
             // "Plan: 3 to add, 1 to change, 0 to destroy."
             for part in trimmed.split(',') {
                 let p = part.trim();
@@ -107,7 +122,10 @@ fn format_tf_plan(output: &str) -> String {
         result.push_str(&format!("  {}\n", r));
     }
     if resources.len() > CAP_LIST {
-        result.push_str(&format!("  ...+{} more resources\n", resources.len() - CAP_LIST));
+        result.push_str(&format!(
+            "  ...+{} more resources\n",
+            resources.len() - CAP_LIST
+        ));
     }
     result.trim().to_string()
 }
@@ -126,17 +144,22 @@ fn format_tf_apply(output: &str) -> String {
 }
 
 fn format_tf_init(output: &str) -> String {
-    if output.contains("successfully initialized") || output.contains("has been successfully initialized") {
+    if output.contains("successfully initialized")
+        || output.contains("has been successfully initialized")
+    {
         return "ok: initialized".to_string();
     }
     // Strip download noise
-    let meaningful: Vec<&str> = output.lines().filter(|l| {
-        let t = l.trim();
-        !t.starts_with("- Downloading")
-            && !t.starts_with("- Installing")
-            && !t.starts_with("- Finding")
-            && !t.is_empty()
-    }).collect();
+    let meaningful: Vec<&str> = output
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("- Downloading")
+                && !t.starts_with("- Installing")
+                && !t.starts_with("- Finding")
+                && !t.is_empty()
+        })
+        .collect();
     meaningful.join("\n")
 }
 
@@ -147,14 +170,17 @@ fn format_table_output(output: &str) -> String {
     }
     let header = lines[0];
     let data = &lines[1..];
-    format!("{}\n{}\n...+{} more rows",
+    format!(
+        "{}\n{}\n...+{} more rows",
         header,
         data[..CAP_LIST.min(data.len())].join("\n"),
-        data.len().saturating_sub(CAP_LIST))
+        data.len().saturating_sub(CAP_LIST)
+    )
 }
 
 fn extract_leading_number(s: &str) -> usize {
-    let num_str: String = s.chars()
+    let num_str: String = s
+        .chars()
         .skip_while(|c| !c.is_ascii_digit())
         .take_while(|c| c.is_ascii_digit())
         .collect();

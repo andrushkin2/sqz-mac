@@ -2,18 +2,34 @@ use super::truncate::CAP_LIST;
 
 pub fn format_ls(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
-    if lines.len() <= 20 { return output.to_string(); }
+    if lines.len() <= 20 {
+        return output.to_string();
+    }
 
     let mut dirs = Vec::new();
     let mut files = Vec::new();
 
     for line in &lines {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("total") { continue; }
+        if trimmed.is_empty() || trimmed.starts_with("total") {
+            continue;
+        }
         if trimmed.starts_with('d') || trimmed.ends_with('/') {
-            dirs.push(trimmed.split_whitespace().last().unwrap_or(trimmed).to_string());
+            dirs.push(
+                trimmed
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or(trimmed)
+                    .to_string(),
+            );
         } else {
-            files.push(trimmed.split_whitespace().last().unwrap_or(trimmed).to_string());
+            files.push(
+                trimmed
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or(trimmed)
+                    .to_string(),
+            );
         }
     }
 
@@ -22,8 +38,12 @@ pub fn format_ls(output: &str) -> String {
         result.push(format!("dirs({}): {}", dirs.len(), dirs.join(", ")));
     }
     if files.len() > 10 {
-        result.push(format!("files({}): {}, ...+{}", files.len(),
-            files[..5].join(", "), files.len() - 5));
+        result.push(format!(
+            "files({}): {}, ...+{}",
+            files.len(),
+            files[..5].join(", "),
+            files.len() - 5
+        ));
     } else if !files.is_empty() {
         result.push(format!("files({}): {}", files.len(), files.join(", ")));
     }
@@ -32,13 +52,22 @@ pub fn format_ls(output: &str) -> String {
 
 pub fn format_find(output: &str) -> String {
     let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.len() <= 20 { return output.to_string(); }
+    if lines.len() <= 20 {
+        return output.to_string();
+    }
 
-    let mut by_dir: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_dir: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for line in &lines {
         let path = std::path::Path::new(line.trim());
-        let parent = path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let parent = path
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         by_dir.entry(parent).or_default().push(name);
     }
 
@@ -56,10 +85,13 @@ pub fn format_find(output: &str) -> String {
 
 pub fn format_grep(output: &str) -> String {
     let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.len() <= CAP_LIST { return output.to_string(); }
+    if lines.len() <= CAP_LIST {
+        return output.to_string();
+    }
 
     // Group by file
-    let mut by_file: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     let mut total = 0;
 
     for line in &lines {
@@ -70,14 +102,19 @@ pub fn format_grep(output: &str) -> String {
             let content = line[colon_pos + 1..].to_string();
             by_file.entry(file).or_default().push(content);
         } else {
-            by_file.entry("".to_string()).or_default().push(line.to_string());
+            by_file
+                .entry("".to_string())
+                .or_default()
+                .push(line.to_string());
         }
     }
 
     let mut result = format!("{} matches in {} files:\n", total, by_file.len());
     let mut shown = 0;
     for (file, matches) in &by_file {
-        if shown >= CAP_LIST { break; }
+        if shown >= CAP_LIST {
+            break;
+        }
         if file.is_empty() {
             for m in matches.iter().take(5) {
                 result.push_str(&format!("  {}\n", m));
@@ -102,12 +139,25 @@ pub fn format_grep(output: &str) -> String {
 
 pub fn format_tree(output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
-    if lines.len() <= 30 { return output.to_string(); }
+    if lines.len() <= 30 {
+        return output.to_string();
+    }
 
     // Filter out noise directories and collapse deep trees
-    let noise_dirs = ["node_modules", ".git", "target", "__pycache__",
-                      ".next", "dist", "build", ".cache", "vendor",
-                      "venv", ".venv", ".tox"];
+    let noise_dirs = [
+        "node_modules",
+        ".git",
+        "target",
+        "__pycache__",
+        ".next",
+        "dist",
+        "build",
+        ".cache",
+        "vendor",
+        "venv",
+        ".venv",
+        ".tox",
+    ];
 
     let mut result = Vec::new();
     let mut skipped = 0;
@@ -115,10 +165,15 @@ pub fn format_tree(output: &str) -> String {
     let mut noise_depth = 0;
 
     for line in &lines {
-        let content = line.trim_start_matches(|c: char| c == '│' || c == ' ' || c == '├' || c == '└' || c == '─' || c == '─');
+        let content = line.trim_start_matches(|c: char| {
+            c == '│' || c == ' ' || c == '├' || c == '└' || c == '─' || c == '─'
+        });
         let depth = line.len() - content.len();
 
-        if noise_dirs.iter().any(|d| content.trim() == *d || content.trim().ends_with(d)) {
+        if noise_dirs
+            .iter()
+            .any(|d| content.trim() == *d || content.trim().ends_with(d))
+        {
             in_noise = true;
             noise_depth = depth;
             result.push(format!("{} [collapsed]", line));
@@ -150,11 +205,15 @@ pub fn format_tree(output: &str) -> String {
 
 pub fn format_curl(output: &str) -> String {
     // Strip progress bar lines (curl uses \r for progress)
-    let lines: Vec<&str> = output.lines()
+    let lines: Vec<&str> = output
+        .lines()
         .filter(|l| {
             let t = l.trim();
-            !t.starts_with('%') && !t.contains("Dload") && !t.contains("Upload")
-                && !t.contains("Xferd") && !t.is_empty()
+            !t.starts_with('%')
+                && !t.contains("Dload")
+                && !t.contains("Upload")
+                && !t.contains("Xferd")
+                && !t.is_empty()
         })
         .collect();
 
@@ -220,7 +279,8 @@ mod tests {
 
     #[test]
     fn test_curl_strips_progress() {
-        let output = "  % Total    % Received % Xferd\n  Dload  Upload   Total\n{\"key\": \"value\"}\n";
+        let output =
+            "  % Total    % Received % Xferd\n  Dload  Upload   Total\n{\"key\": \"value\"}\n";
         let result = format_curl(output);
         assert_eq!(result, "{\"key\": \"value\"}");
     }

@@ -467,7 +467,7 @@ mod tests {
         // Pick warning in (0, 0.9), then ceiling in (warning, 1.0).
         (1u32..=8999u32).prop_flat_map(|w_raw| {
             let warning = w_raw as f64 / 10_000.0; // in (0.0001, 0.8999)
-            // ceiling must be > warning and < 1.0
+                                                   // ceiling must be > warning and < 1.0
             let c_min = (w_raw + 1) as f64 / 10_000.0;
             let c_max = 9999.0_f64 / 10_000.0;
             // Map a u32 in [c_min_int, 9999] to a f64
@@ -617,10 +617,7 @@ mod tests {
 
     /// Strategy for invalid max_tools values: 0 or >50.
     fn arb_invalid_max_tools() -> impl Strategy<Value = usize> {
-        prop_oneof![
-            Just(0usize),
-            (51usize..=200usize),
-        ]
+        prop_oneof![Just(0usize), (51usize..=200usize),]
     }
 
     /// Strategy for invalid complexity_threshold values: 0.0, 1.0, negative, or >1.0.

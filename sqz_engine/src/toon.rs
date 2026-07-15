@@ -62,8 +62,10 @@ fn encode_value(v: &serde_json::Value, buf: &mut String) {
         serde_json::Value::Number(n) => {
             // Use serde_json's own serializer to preserve full f64 precision.
             // n.to_string() can lose precision for some f64 values.
-            buf.push_str(&serde_json::to_string(&serde_json::Value::Number(n.clone()))
-                .unwrap_or_else(|_| n.to_string()));
+            buf.push_str(
+                &serde_json::to_string(&serde_json::Value::Number(n.clone()))
+                    .unwrap_or_else(|_| n.to_string()),
+            );
         }
         serde_json::Value::String(s) => encode_string(s, buf),
         serde_json::Value::Array(arr) => {
@@ -181,7 +183,9 @@ impl<'a> Parser<'a> {
             Some(b) if b == expected => Ok(()),
             Some(b) => Err(format!(
                 "expected '{}' got '{}' at pos {}",
-                expected as char, b as char, self.pos - 1
+                expected as char,
+                b as char,
+                self.pos - 1
             )),
             None => Err(format!("unexpected EOF, expected '{}'", expected as char)),
         }
@@ -217,7 +221,10 @@ impl<'a> Parser<'a> {
                 Ok(serde_json::Value::Null)
             }
             Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
-            Some(b) => Err(format!("unexpected byte '{}' at pos {}", b as char, self.pos)),
+            Some(b) => Err(format!(
+                "unexpected byte '{}' at pos {}",
+                b as char, self.pos
+            )),
             None => Err("unexpected EOF".into()),
         }
     }
@@ -279,13 +286,10 @@ impl<'a> Parser<'a> {
     fn parse_key(&mut self) -> std::result::Result<String, String> {
         match self.peek() {
             Some(b'"') => self.parse_string(),
-            Some(b) if (b as char).is_ascii_alphabetic() || b == b'_' => {
-                self.parse_bare_key()
-            }
+            Some(b) if (b as char).is_ascii_alphabetic() || b == b'_' => self.parse_bare_key(),
             Some(b) => Err(format!(
                 "expected key at pos {}, got '{}'",
-                self.pos,
-                b as char
+                self.pos, b as char
             )),
             None => Err("unexpected EOF expecting key".into()),
         }
@@ -377,8 +381,9 @@ impl<'a> Parser<'a> {
                                     return Err(format!("expected low surrogate, got U+{low:04X}"));
                                 }
                                 let scalar = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
-                                char::from_u32(scalar)
-                                    .ok_or_else(|| format!("invalid surrogate pair scalar U+{scalar:X}"))?
+                                char::from_u32(scalar).ok_or_else(|| {
+                                    format!("invalid surrogate pair scalar U+{scalar:X}")
+                                })?
                             } else {
                                 char::from_u32(code)
                                     .ok_or_else(|| format!("invalid unicode codepoint {code}"))?
@@ -388,9 +393,7 @@ impl<'a> Parser<'a> {
                             let encoded = ch.encode_utf8(&mut tmp);
                             bytes.extend_from_slice(encoded.as_bytes());
                         }
-                        Some(b) => {
-                            return Err(format!("unknown escape \\{}", b as char))
-                        }
+                        Some(b) => return Err(format!("unknown escape \\{}", b as char)),
                         None => return Err("EOF in escape".into()),
                     }
                 }
@@ -442,8 +445,7 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
         }
-        let num_str = std::str::from_utf8(&self.src[start..self.pos])
-            .map_err(|e| e.to_string())?;
+        let num_str = std::str::from_utf8(&self.src[start..self.pos]).map_err(|e| e.to_string())?;
         let n: serde_json::Number = num_str
             .parse()
             .map_err(|e| format!("bad number '{num_str}': {e}"))?;
@@ -477,18 +479,16 @@ mod tests {
         ];
 
         leaf.prop_recursive(
-            4,   // max depth
-            64,  // max total nodes
-            8,   // max items per collection
+            4,  // max depth
+            64, // max total nodes
+            8,  // max items per collection
             |inner| {
                 prop_oneof![
                     // Array of arbitrary values
-                    prop::collection::vec(inner.clone(), 0..8)
-                        .prop_map(serde_json::Value::Array),
+                    prop::collection::vec(inner.clone(), 0..8).prop_map(serde_json::Value::Array),
                     // Object with arbitrary string keys and arbitrary values
-                    prop::collection::hash_map(".*", inner, 0..8).prop_map(|m| {
-                        serde_json::Value::Object(m.into_iter().collect())
-                    }),
+                    prop::collection::hash_map(".*", inner, 0..8)
+                        .prop_map(|m| { serde_json::Value::Object(m.into_iter().collect()) }),
                 ]
             },
         )
@@ -531,12 +531,9 @@ mod tests {
 
         // Deeply nested object: 3 levels deep, 5-8 fields per level
         // At depth 3, each field has 6 spaces of indentation in pretty-print
-        let arb_inner = prop::collection::hash_map(
-            "[a-z]{4,8}",
-            arb_leaf_string.clone(),
-            5..8usize,
-        )
-        .prop_map(|m| serde_json::Value::Object(m.into_iter().collect()));
+        let arb_inner =
+            prop::collection::hash_map("[a-z]{4,8}", arb_leaf_string.clone(), 5..8usize)
+                .prop_map(|m| serde_json::Value::Object(m.into_iter().collect()));
 
         let arb_mid = prop::collection::hash_map(
             "[a-z]{4,8}",
@@ -551,12 +548,8 @@ mod tests {
         // Top-level: 8-12 fields, always nested objects (no flat leaf strings)
         // This guarantees deep indentation overhead in pretty-print, ensuring
         // the 30% reduction threshold is reliably met.
-        prop::collection::hash_map(
-            "[a-z]{4,8}",
-            arb_mid,
-            8..12usize,
-        )
-        .prop_map(|m| serde_json::Value::Object(m.into_iter().collect()))
+        prop::collection::hash_map("[a-z]{4,8}", arb_mid, 8..12usize)
+            .prop_map(|m| serde_json::Value::Object(m.into_iter().collect()))
     }
 
     proptest! {
@@ -621,7 +614,7 @@ mod tests {
     #[test]
     fn roundtrip_number() {
         assert_eq!(rt(json!(42)), json!(42));
-        assert_eq!(rt(json!(3.14)), json!(3.14));
+        assert_eq!(rt(json!(3.25)), json!(3.25));
         assert_eq!(rt(json!(-7)), json!(-7));
     }
 

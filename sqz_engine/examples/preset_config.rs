@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run --example preset_config -p sqz-engine`
 
-use sqz_engine::preset::{Preset, PresetParser};
+use sqz_engine::preset::PresetParser;
 use sqz_engine::SqzEngine;
 
 fn main() {
@@ -51,7 +51,10 @@ complexity_threshold = 0.4
 
     // Parse and validate the preset
     let preset = PresetParser::parse(toml).expect("invalid preset TOML");
-    println!("Loaded preset: {} v{}", preset.preset.name, preset.preset.version);
+    println!(
+        "Loaded preset: {} v{}",
+        preset.preset.name, preset.preset.version
+    );
     println!("Description: {}", preset.preset.description);
     println!("Window size: {} tokens", preset.budget.default_window_size);
     println!();
@@ -67,7 +70,10 @@ complexity_threshold = 0.4
     let result = engine.compress(input).unwrap();
     println!("Input:  {input}");
     println!("Output: {}", result.data);
-    println!("Tokens: {} → {}", result.tokens_original, result.tokens_compressed);
+    println!(
+        "Tokens: {} → {}",
+        result.tokens_original, result.tokens_compressed
+    );
     println!();
 
     // You can also serialize a preset back to TOML

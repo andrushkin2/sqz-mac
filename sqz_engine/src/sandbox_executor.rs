@@ -183,7 +183,13 @@ impl OutputFilter {
         // Sanitize intent for FTS5 query: keep alphanumeric and spaces
         let sanitized: String = intent
             .chars()
-            .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+            .map(|c| {
+                if c.is_alphanumeric() || c.is_whitespace() {
+                    c
+                } else {
+                    ' '
+                }
+            })
             .collect();
         let terms: Vec<&str> = sanitized.split_whitespace().collect();
         if terms.is_empty() {
@@ -208,9 +214,7 @@ impl OutputFilter {
 
         let mut results = Vec::new();
         for row in rows {
-            results.push(
-                row.map_err(|e| SqzError::Other(format!("FTS5 row read failed: {e}")))?,
-            );
+            results.push(row.map_err(|e| SqzError::Other(format!("FTS5 row read failed: {e}")))?);
         }
         Ok(results)
     }
@@ -240,11 +244,15 @@ impl OutputFilter {
 
         let mut vocab = Vec::new();
         for row in rows {
-            vocab.push(
-                row.map_err(|e| SqzError::Other(format!("vocab row read failed: {e}")))?,
-            );
+            vocab.push(row.map_err(|e| SqzError::Other(format!("vocab row read failed: {e}")))?);
         }
         Ok(vocab)
+    }
+}
+
+impl Default for SandboxExecutor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -280,10 +288,9 @@ impl SandboxExecutor {
     /// via environment variable inheritance.
     pub fn execute(&self, code: &str, language: &str) -> Result<SandboxResult> {
         let lang = language.to_lowercase();
-        let runtime = self
-            .runtimes
-            .get(&lang)
-            .ok_or_else(|| SqzError::Other(format!("unsupported or unavailable runtime: {lang}")))?;
+        let runtime = self.runtimes.get(&lang).ok_or_else(|| {
+            SqzError::Other(format!("unsupported or unavailable runtime: {lang}"))
+        })?;
 
         let env = build_credential_env();
 
@@ -311,7 +318,7 @@ impl SandboxExecutor {
         let mut result = self.execute(code, language)?;
 
         let should_filter = result.stdout.len() > self.filter_threshold
-            && intent.map_or(false, |i| !i.trim().is_empty());
+            && intent.is_some_and(|i| !i.trim().is_empty());
 
         if should_filter {
             let intent_str = intent.unwrap(); // safe: checked above
@@ -370,7 +377,7 @@ impl SandboxExecutor {
             _ => "tmp",
         };
 
-        let tmp_dir = tempfile::tempdir().map_err(|e| SqzError::Io(e))?;
+        let tmp_dir = tempfile::tempdir().map_err(SqzError::Io)?;
         let script_path = tmp_dir.path().join(format!("sandbox_script.{ext}"));
         {
             let mut f = std::fs::File::create(&script_path)?;
@@ -456,9 +463,7 @@ impl SandboxExecutor {
 
         // Run the compiled binary
         let mut cmd = Command::new(&bin_path);
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .envs(env);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::null()).envs(env);
 
         self.run_with_timeout(cmd, "runtime=rust")
     }
@@ -624,7 +629,10 @@ mod tests {
     fn test_supported_languages_list() {
         let executor = SandboxExecutor::new();
         let supported = executor.supported_languages();
-        assert!(supported.len() >= 6, "should list at least 6 supported languages");
+        assert!(
+            supported.len() >= 6,
+            "should list at least 6 supported languages"
+        );
         assert!(supported.contains(&"js"));
         assert!(supported.contains(&"python"));
         assert!(supported.contains(&"shell"));
@@ -683,7 +691,9 @@ echo "also visible""#;
         if !executor.is_available("python") {
             return;
         }
-        let result = executor.execute("print('hello from python')", "python").unwrap();
+        let result = executor
+            .execute("print('hello from python')", "python")
+            .unwrap();
         assert_eq!(result.status_code, 0);
         assert_eq!(result.stdout.trim(), "hello from python");
     }
@@ -757,7 +767,10 @@ echo "also visible""#;
         // Temporarily set an AWS var to verify it's picked up
         std::env::set_var("AWS_TEST_SANDBOX", "test_value");
         let env = build_credential_env();
-        assert_eq!(env.get("AWS_TEST_SANDBOX").map(|s| s.as_str()), Some("test_value"));
+        assert_eq!(
+            env.get("AWS_TEST_SANDBOX").map(|s| s.as_str()),
+            Some("test_value")
+        );
         std::env::remove_var("AWS_TEST_SANDBOX");
     }
 
@@ -784,13 +797,19 @@ echo "also visible""#;
     fn test_chunk_output_splits_large_paragraphs() {
         // Build a single paragraph > 512 bytes with many lines
         let line = "a]".repeat(30); // 60 chars per line
-        let big_para = (0..20).map(|i| format!("{line} line{i}")).collect::<Vec<_>>().join("\n");
+        let big_para = (0..20)
+            .map(|i| format!("{line} line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(big_para.len() > 512);
 
         let chunks = OutputFilter::chunk_output(&big_para);
         assert!(chunks.len() > 1, "large paragraph should be sub-split");
         for chunk in &chunks {
-            assert!(chunk.len() <= 600, "each sub-chunk should be roughly ≤512 bytes");
+            assert!(
+                chunk.len() <= 600,
+                "each sub-chunk should be roughly ≤512 bytes"
+            );
         }
     }
 
@@ -808,7 +827,10 @@ echo "also visible""#;
                     error: type mismatch in function foo\n\n\
                     success: 3 tests passed";
         let result = OutputFilter::filter(text, "error compilation").unwrap();
-        assert!(!result.matched_sections.is_empty(), "should find error-related chunks");
+        assert!(
+            !result.matched_sections.is_empty(),
+            "should find error-related chunks"
+        );
         // At least one matched section should contain "error"
         assert!(
             result.matched_sections.iter().any(|s| s.contains("error")),
@@ -823,12 +845,17 @@ echo "also visible""#;
                     rust programming language is fast and safe\n\n\
                     memory safety without garbage collection";
         let result = OutputFilter::filter(text, "rust").unwrap();
-        assert!(!result.vocabulary.is_empty(), "vocabulary should not be empty");
+        assert!(
+            !result.vocabulary.is_empty(),
+            "vocabulary should not be empty"
+        );
         // Vocabulary should contain stemmed terms from the content
         // (porter stemmer may stem words, so check for presence of some terms)
         let vocab_joined = result.vocabulary.join(" ");
         assert!(
-            vocab_joined.contains("rust") || vocab_joined.contains("fast") || vocab_joined.contains("safe"),
+            vocab_joined.contains("rust")
+                || vocab_joined.contains("fast")
+                || vocab_joined.contains("safe"),
             "vocabulary should contain terms from the indexed content"
         );
     }
@@ -846,7 +873,10 @@ echo "also visible""#;
         // Intent with special characters should not crash FTS5
         let text = "error: something went wrong\n\nwarning: check this";
         let result = OutputFilter::filter(text, "error: (something) [wrong]");
-        assert!(result.is_ok(), "special chars in intent should be sanitized");
+        assert!(
+            result.is_ok(),
+            "special chars in intent should be sanitized"
+        );
     }
 
     #[test]
@@ -873,9 +903,7 @@ echo "also visible""#;
         }
         // Even large output without intent should not filter
         let code = "for i in $(seq 1 1000); do echo \"line $i: some padding text to make it bigger\"; done";
-        let (result, filtered) = executor
-            .execute_with_intent(code, "shell", None)
-            .unwrap();
+        let (result, filtered) = executor.execute_with_intent(code, "shell", None).unwrap();
         assert!(!result.was_indexed);
         assert!(filtered.is_none());
     }
@@ -900,9 +928,15 @@ for i in $(seq 1 50); do echo "success: test suite $i passed with 100% coverage"
         let (result, filtered) = executor
             .execute_with_intent(code, "shell", Some("error compilation"))
             .unwrap();
-        assert!(result.was_indexed, "large output with intent should be indexed");
+        assert!(
+            result.was_indexed,
+            "large output with intent should be indexed"
+        );
         let filtered = filtered.expect("should have filtered output");
-        assert!(!filtered.matched_sections.is_empty(), "should have matched sections");
+        assert!(
+            !filtered.matched_sections.is_empty(),
+            "should have matched sections"
+        );
         assert!(!filtered.vocabulary.is_empty(), "should have vocabulary");
         assert!(filtered.total_chunks > 0);
     }

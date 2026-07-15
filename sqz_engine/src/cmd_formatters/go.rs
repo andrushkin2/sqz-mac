@@ -11,7 +11,12 @@ pub fn format_go(subcmd: Option<&str>, output: &str) -> Option<String> {
 
 fn format_go_test(output: &str) -> String {
     // Detect JSON event stream (go test -json)
-    if output.lines().next().map(|l| l.trim_start().starts_with('{')).unwrap_or(false) {
+    if output
+        .lines()
+        .next()
+        .map(|l| l.trim_start().starts_with('{'))
+        .unwrap_or(false)
+    {
         if let Some(result) = parse_go_test_json(output) {
             return result;
         }
@@ -78,8 +83,10 @@ fn parse_go_test_json(output: &str) -> Option<String> {
                         if name == test_name && lines.len() < 20 {
                             lines.push(out.trim_end().to_string());
                         }
-                    } else if out.contains("FAIL") || out.contains("Error") || out.contains("panic") {
-                        current_failure = Some((test_name.to_string(), vec![out.trim_end().to_string()]));
+                    } else if out.contains("FAIL") || out.contains("Error") || out.contains("panic")
+                    {
+                        current_failure =
+                            Some((test_name.to_string(), vec![out.trim_end().to_string()]));
                     }
                 }
             }
@@ -117,7 +124,10 @@ fn parse_go_test_json(output: &str) -> Option<String> {
         }
     }
     if failures.len() > CAP_ERRORS {
-        result.push_str(&format!("  ...+{} more failures\n", failures.len() - CAP_ERRORS));
+        result.push_str(&format!(
+            "  ...+{} more failures\n",
+            failures.len() - CAP_ERRORS
+        ));
     }
 
     Some(result.trim().to_string())
@@ -128,23 +138,25 @@ fn format_go_build(output: &str) -> String {
         return "ok".to_string();
     }
 
-    let errors: Vec<&str> = output.lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
+    let errors: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
 
     if errors.is_empty() {
         return "ok".to_string();
     }
 
     // Group by file
-    let mut by_file: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for line in &errors {
         // Go errors: "./file.go:10:5: error message"
         if let Some(colon) = line.find(':') {
             let file = line[..colon].to_string();
             by_file.entry(file).or_default().push(line.to_string());
         } else {
-            by_file.entry("other".to_string()).or_default().push(line.to_string());
+            by_file
+                .entry("other".to_string())
+                .or_default()
+                .push(line.to_string());
         }
     }
 
@@ -166,7 +178,8 @@ fn format_go_vet(output: &str) -> String {
         return "ok: no issues".to_string();
     }
 
-    let issues: Vec<&str> = output.lines()
+    let issues: Vec<&str> = output
+        .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .collect();
 
@@ -174,8 +187,16 @@ fn format_go_vet(output: &str) -> String {
         return "ok: no issues".to_string();
     }
 
-    format!("go vet: {} issues\n{}", issues.len(),
-        issues.iter().take(CAP_ERRORS).copied().collect::<Vec<_>>().join("\n"))
+    format!(
+        "go vet: {} issues\n{}",
+        issues.len(),
+        issues
+            .iter()
+            .take(CAP_ERRORS)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 #[cfg(test)]

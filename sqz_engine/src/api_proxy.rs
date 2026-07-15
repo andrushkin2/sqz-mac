@@ -11,7 +11,6 @@
 /// - Conversation history: summarize old turns, keep recent ones verbatim
 /// - Tool results: apply the full sqz pipeline (strip nulls, TOON, condense, etc.)
 /// - Repeated content: dedup across messages in the same request
-
 use std::collections::HashMap;
 
 use crate::error::{Result, SqzError};
@@ -157,7 +156,11 @@ fn compress_openai(
     let keep_recent = config.keep_recent_messages.min(total);
 
     for (i, msg) in messages.iter_mut().enumerate() {
-        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let role = msg
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let is_recent = i >= total.saturating_sub(keep_recent);
 
         match role.as_str() {
@@ -211,7 +214,11 @@ fn compress_anthropic(
     let keep_recent = config.keep_recent_messages.min(total);
 
     for (i, msg) in messages.iter_mut().enumerate() {
-        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let role = msg
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let is_recent = i >= total.saturating_sub(keep_recent);
 
         // Compress tool_result content blocks
@@ -360,8 +367,7 @@ fn compress_content_block(
             let compressed = engine.compress_or_passthrough(text);
             if compressed.tokens_compressed < original_tokens {
                 *content = serde_json::Value::String(compressed.data);
-                stats.tool_result_tokens_saved +=
-                    original_tokens - compressed.tokens_compressed;
+                stats.tool_result_tokens_saved += original_tokens - compressed.tokens_compressed;
                 stats.tokens_original += original_tokens;
                 stats.tokens_compressed += compressed.tokens_compressed;
                 stats.messages_compressed += 1;
@@ -427,7 +433,9 @@ pub fn parse_http_request(raw: &[u8]) -> Result<(String, String, HashMap<String,
     let mut lines = text.lines();
 
     // Request line
-    let request_line = lines.next().ok_or_else(|| SqzError::Other("empty request".into()))?;
+    let request_line = lines
+        .next()
+        .ok_or_else(|| SqzError::Other("empty request".into()))?;
     let parts: Vec<&str> = request_line.split_whitespace().collect();
     if parts.len() < 2 {
         return Err(SqzError::Other("malformed request line".into()));
@@ -442,15 +450,14 @@ pub fn parse_http_request(raw: &[u8]) -> Result<(String, String, HashMap<String,
             break;
         }
         if let Some((key, value)) = line.split_once(':') {
-            headers.insert(
-                key.trim().to_lowercase(),
-                value.trim().to_string(),
-            );
+            headers.insert(key.trim().to_lowercase(), value.trim().to_string());
         }
     }
 
     // Body: everything after the blank line
-    let body_start = text.find("\r\n\r\n").map(|p| p + 4)
+    let body_start = text
+        .find("\r\n\r\n")
+        .map(|p| p + 4)
         .or_else(|| text.find("\n\n").map(|p| p + 2))
         .unwrap_or(text.len());
     let body = text[body_start..].to_string();
@@ -459,7 +466,12 @@ pub fn parse_http_request(raw: &[u8]) -> Result<(String, String, HashMap<String,
 }
 
 /// Build an HTTP response from status, headers, and body.
-pub fn build_http_response(status: u16, status_text: &str, headers: &[(&str, &str)], body: &str) -> Vec<u8> {
+pub fn build_http_response(
+    status: u16,
+    status_text: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Vec<u8> {
     let mut response = format!("HTTP/1.1 {status} {status_text}\r\n");
     for (key, value) in headers {
         response.push_str(&format!("{key}: {value}\r\n"));
@@ -493,9 +505,18 @@ mod tests {
 
     #[test]
     fn test_api_format_from_path() {
-        assert_eq!(ApiFormat::from_path("/v1/chat/completions"), Some(ApiFormat::OpenAi));
-        assert_eq!(ApiFormat::from_path("/v1/messages"), Some(ApiFormat::Anthropic));
-        assert_eq!(ApiFormat::from_path("/v1/models/gemini/generateContent"), Some(ApiFormat::Google));
+        assert_eq!(
+            ApiFormat::from_path("/v1/chat/completions"),
+            Some(ApiFormat::OpenAi)
+        );
+        assert_eq!(
+            ApiFormat::from_path("/v1/messages"),
+            Some(ApiFormat::Anthropic)
+        );
+        assert_eq!(
+            ApiFormat::from_path("/v1/models/gemini/generateContent"),
+            Some(ApiFormat::Google)
+        );
         assert_eq!(ApiFormat::from_path("/unknown"), None);
     }
 
@@ -514,12 +535,13 @@ mod tests {
             ]
         });
 
-        let (compressed, stats) = compress_request(
+        let (compressed, _stats) = compress_request(
             &serde_json::to_string(&body).unwrap(),
             ApiFormat::OpenAi,
             &config,
             &engine,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Should parse as valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&compressed).unwrap();
@@ -544,17 +566,21 @@ mod tests {
             ]
         });
 
-        let (compressed, stats) = compress_request(
+        let (compressed, _stats) = compress_request(
             &serde_json::to_string(&body).unwrap(),
             ApiFormat::Anthropic,
             &config,
             &engine,
-        ).unwrap();
+        )
+        .unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&compressed).unwrap();
         assert!(parsed.get("system").is_some());
         assert!(parsed.get("messages").is_some());
-        assert_eq!(parsed["model"].as_str().unwrap(), "claude-sonnet-4-20250514");
+        assert_eq!(
+            parsed["model"].as_str().unwrap(),
+            "claude-sonnet-4-20250514"
+        );
     }
 
     #[test]
@@ -571,12 +597,13 @@ mod tests {
             ]
         });
 
-        let (compressed, stats) = compress_request(
+        let (compressed, _stats) = compress_request(
             &serde_json::to_string(&body).unwrap(),
             ApiFormat::OpenAi,
             &config,
             &engine,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Tool result should have been compressed
         let parsed: serde_json::Value = serde_json::from_str(&compressed).unwrap();
@@ -608,24 +635,32 @@ mod tests {
             ]
         });
 
-        let (compressed, stats) = compress_request(
+        let (compressed, _stats) = compress_request(
             &serde_json::to_string(&body).unwrap(),
             ApiFormat::OpenAi,
             &config,
             &engine,
-        ).unwrap();
+        )
+        .unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&compressed).unwrap();
         let messages = parsed["messages"].as_array().unwrap();
 
         // Recent messages should be preserved verbatim
         assert_eq!(messages[3]["content"].as_str().unwrap(), "Recent message 1");
-        assert_eq!(messages[4]["content"].as_str().unwrap(), "Recent response 1");
+        assert_eq!(
+            messages[4]["content"].as_str().unwrap(),
+            "Recent response 1"
+        );
 
         // Old messages should be summarized (shorter)
         let old_msg = messages[1]["content"].as_str().unwrap();
-        assert!(old_msg.len() < long_content.len(),
-            "old message should be summarized: {} vs {}", old_msg.len(), long_content.len());
+        assert!(
+            old_msg.len() < long_content.len(),
+            "old message should be summarized: {} vs {}",
+            old_msg.len(),
+            long_content.len()
+        );
     }
 
     #[test]
@@ -682,7 +717,12 @@ mod tests {
 
     #[test]
     fn test_build_http_response() {
-        let resp = build_http_response(200, "OK", &[("content-type", "application/json")], "{\"ok\":true}");
+        let resp = build_http_response(
+            200,
+            "OK",
+            &[("content-type", "application/json")],
+            "{\"ok\":true}",
+        );
         let text = String::from_utf8(resp).unwrap();
         assert!(text.starts_with("HTTP/1.1 200 OK"));
         assert!(text.contains("content-type: application/json"));
@@ -723,10 +763,15 @@ mod tests {
                 format,
                 &config,
                 &engine,
-            ).unwrap();
+            )
+            .unwrap();
 
             let parsed: serde_json::Value = serde_json::from_str(&compressed).unwrap();
-            assert!(parsed.get("model").is_some(), "model field must be preserved for {:?}", format);
+            assert!(
+                parsed.get("model").is_some(),
+                "model field must be preserved for {:?}",
+                format
+            );
         }
     }
 

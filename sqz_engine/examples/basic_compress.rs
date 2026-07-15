@@ -15,7 +15,10 @@ fn main() {
     println!("=== Plain text ===");
     println!("input:  {plain}");
     println!("output: {}", result.data);
-    println!("tokens: {} → {}", result.tokens_original, result.tokens_compressed);
+    println!(
+        "tokens: {} → {}",
+        result.tokens_original, result.tokens_compressed
+    );
     println!("stages: {:?}", result.stages_applied);
     println!();
 

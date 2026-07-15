@@ -6,7 +6,6 @@
 /// RLE is provably optimal for data with runs of identical symbols
 /// (Shannon 1948). This implementation works at the token/phrase level
 /// rather than the byte level, making it effective for CLI output patterns.
-
 use crate::error::Result;
 
 /// Result of RLE compression.
@@ -51,7 +50,7 @@ pub fn rle_compress(text: &str, min_run_length: usize) -> Result<RleResult> {
             // same text can be recovered from "{text} [×N]".
             output.push(format!("{} [×{}]", lines[i], run_len));
             runs_collapsed += 1;
-            let line_tokens = (lines[i].len() as u32 + 3) / 4;
+            let line_tokens = (lines[i].len() as u32).div_ceil(4);
             tokens_saved += line_tokens * (run_len as u32 - 1);
             i += run_len;
         } else {
@@ -100,7 +99,8 @@ pub fn sliding_window_dedup(text: &str, min_match_words: usize) -> Result<Slidin
     }
 
     // Build a phrase index: map each n-word phrase to its first occurrence line
-    let mut phrase_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut phrase_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut output = Vec::new();
     let mut dedup_count = 0usize;
     let mut tokens_saved = 0u32;
@@ -115,7 +115,7 @@ pub fn sliding_window_dedup(text: &str, min_match_words: usize) -> Result<Slidin
                 // This exact line appeared before — replace with back-reference
                 output.push(format!("[→L{}]", first_line + 1));
                 dedup_count += 1;
-                tokens_saved += (phrase.len() as u32 + 3) / 4;
+                tokens_saved += (phrase.len() as u32).div_ceil(4);
                 continue;
             }
         }
@@ -178,10 +178,25 @@ mod tests {
         // merely share a prefix must pass through unchanged.
         let input = "Compiling foo v1.0\nCompiling bar v2.0\nCompiling baz v3.0\ndone\n";
         let result = rle_compress(input, 2).unwrap();
-        assert_eq!(result.runs_collapsed, 0, "different lines must not be collapsed");
-        assert!(result.text.contains("foo"), "filename 'foo' must survive: {}", result.text);
-        assert!(result.text.contains("bar"), "filename 'bar' must survive: {}", result.text);
-        assert!(result.text.contains("baz"), "filename 'baz' must survive: {}", result.text);
+        assert_eq!(
+            result.runs_collapsed, 0,
+            "different lines must not be collapsed"
+        );
+        assert!(
+            result.text.contains("foo"),
+            "filename 'foo' must survive: {}",
+            result.text
+        );
+        assert!(
+            result.text.contains("bar"),
+            "filename 'bar' must survive: {}",
+            result.text
+        );
+        assert!(
+            result.text.contains("baz"),
+            "filename 'baz' must survive: {}",
+            result.text
+        );
     }
 
     #[test]
@@ -195,8 +210,12 @@ mod tests {
                      drwxr-xr-x  2 user user   64 Apr 18 10:00 environment\n";
         let result = rle_compress(input, 2).unwrap();
         for name in &["packages", "configuration", "documentation", "environment"] {
-            assert!(result.text.contains(name),
-                "filename '{}' must be preserved — got:\n{}", name, result.text);
+            assert!(
+                result.text.contains(name),
+                "filename '{}' must be preserved — got:\n{}",
+                name,
+                result.text
+            );
         }
     }
 
@@ -232,8 +251,14 @@ mod tests {
         let input = "ok\nok\ndone\n";
         let result_2 = rle_compress(input, 2).unwrap();
         let result_3 = rle_compress(input, 3).unwrap();
-        assert!(result_2.runs_collapsed > 0, "run of 2 should collapse with min=2");
-        assert_eq!(result_3.runs_collapsed, 0, "run of 2 should NOT collapse with min=3");
+        assert!(
+            result_2.runs_collapsed > 0,
+            "run of 2 should collapse with min=2"
+        );
+        assert_eq!(
+            result_3.runs_collapsed, 0,
+            "run of 2 should NOT collapse with min=3"
+        );
     }
 
     // --- Sliding window dedup tests ---
