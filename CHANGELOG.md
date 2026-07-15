@@ -14,6 +14,16 @@ Everything under "Upstream history" below is unmodified upstream `sqz` history.
 
 ### Fixed
 
+- **`git` command output corrupted under a non-English shell locale** (upstream
+  issue [#30](https://github.com/ojuschugh1/sqz/issues/30)) — `cmd_formatters/git.rs`
+  keys off English labels (`modified:`, `new file:`, `nothing to commit`, etc.).
+  With e.g. `LANG=it_IT`, git emits localized labels the parser doesn't
+  recognize, so it falls through to the `git status -s` short-format heuristic
+  and misparses the localized text as status codes, garbling the output. Both
+  hook rewrite paths (Claude Code's `tool_hooks.rs` and the OpenCode plugin)
+  now execute `git` commands with `LC_ALL=C` forced, so this formatter only
+  ever sees English output regardless of the user's shell locale.
+
 - **Safe mode wasn't actually safe** — `CompressionMode` was never threaded into
   `pipeline.compress()`, so the lossy subsystem (RLE, sliding-window dedup,
   entropy-weighted truncation, token pruning) ran unconditionally regardless of
@@ -45,6 +55,35 @@ Everything under "Upstream history" below is unmodified upstream `sqz` history.
   plugin now splits compound commands on shell operators and compresses each
   sub-command's output individually instead of abandoning compression for the
   whole line, while leaving redirect targets untouched.
+
+### Verified
+
+Reviewed all upstream open issues against this fork's macOS-only, PowerShell-free
+scope. Windows-only reports ([#26](https://github.com/ojuschugh1/sqz/issues/26),
+[#20](https://github.com/ojuschugh1/sqz/issues/20)) don't apply. The rest were
+already resolved and are now locked in with regression tests:
+
+- [#34](https://github.com/ojuschugh1/sqz/issues/34) (multi-byte UTF-8 panics) —
+  confirmed fixed by the `safe_truncate`/`safe_split_at` work above; added a
+  regression test covering the default and Aggressive pipelines across several
+  scripts (Cyrillic, CJK, emoji).
+- [#32](https://github.com/ojuschugh1/sqz/issues/32) (`entropy_truncate` runs on
+  MCP file reads) — confirmed `cache_manager.rs` (the file-read/dedup path)
+  always uses `CompressionMode::Default`, which never reaches the lossy
+  subsystem per the gating fix above.
+- [#22](https://github.com/ojuschugh1/sqz/issues/22) (OpenCode plugin corrupts
+  shell-operator commands) — confirmed the `has_shell_operators` guard is
+  present and tested in both hook paths.
+- [#21](https://github.com/ojuschugh1/sqz/issues/21) (`sqz init` not idempotent)
+  — confirmed the sentinel-based upsert/removal fix (inherited from upstream)
+  holds end-to-end: verified 4x `sqz init --global` produces exactly one hook
+  entry per event, and `sqz uninstall` removes them all. Added a round-trip
+  unit test.
+- [#18](https://github.com/ojuschugh1/sqz/issues/18) (stats stay at zero) — the
+  reported trigger (a VS Code extension not wired to the stats DB) doesn't
+  apply; this fork ships no VS Code extension (see Removed, below). Confirmed
+  both paths this fork does ship — the CLI/shell-hook path and the MCP server —
+  correctly log to `sqz stats`. Added end-to-end CLI integration tests.
 
 ### Removed
 
