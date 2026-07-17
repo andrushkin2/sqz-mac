@@ -265,6 +265,12 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform, sqz_cmd: &str)
         || command.starts_with("SQZ_CMD=")
         || command.contains("sqz compress --cmd ")
         || command.contains("sqz.exe compress --cmd ")
+        // The rewrite now inserts `--no-cache` before `--cmd` (dedup-off,
+        // matching the shell hooks). Detect that form too, otherwise an
+        // already-wrapped command would be re-wrapped — the runaway-prefix
+        // bug from issue #5.
+        || command.contains("sqz compress --no-cache --cmd ")
+        || command.contains("sqz.exe compress --no-cache --cmd ")
     {
         return Ok(match platform {
             HookPlatform::Cursor => "{}".to_string(),
@@ -324,8 +330,16 @@ fn process_hook_for_platform(input: &str, platform: HookPlatform, sqz_cmd: &str)
     } else {
         command.to_string()
     };
+    // `--no-cache` bypasses the persistent SHA-256 dedup cache so an agent
+    // never receives an opaque `§ref:HASH§` token in place of real command
+    // output when a command's output repeats byte-for-byte across sessions.
+    // This mirrors the interactive shell hooks, which all `export
+    // SQZ_NO_DEDUP=1` because "some models loop on refs they can't parse"
+    // (see shell_hook.rs). The agent still benefits from per-command
+    // formatters and the compression pipeline; only the 13-token `§ref§`
+    // shortcut is disabled.
     let rewritten = format!(
-        "{} 2>&1 | {} compress --cmd {}",
+        "{} 2>&1 | {} compress --no-cache --cmd {}",
         exec_command,
         shell_escape(sqz_cmd),
         shell_escape(command),
@@ -1655,6 +1669,11 @@ mod tests {
             "should pass the full command as --cmd so subcommand formatters dispatch: {cmd}"
         );
         assert!(
+            cmd.contains("compress --no-cache --cmd"),
+            "agent hook rewrites must pass --no-cache so the agent never receives an \
+             opaque §ref§ dedup token in place of real output: {cmd}"
+        );
+        assert!(
             !cmd.contains("SQZ_CMD="),
             "new rewrites must not emit the legacy sh-style env prefix: {cmd}"
         );
@@ -1670,6 +1689,46 @@ mod tests {
         assert!(
             parsed.get("continue").is_none(),
             "Claude Code format should not have top-level continue"
+        );
+    }
+
+    /// Regression: agent-driven hook rewrites must disable the persistent
+    /// dedup cache (`--no-cache`), matching the interactive shell hooks which
+    /// all `export SQZ_NO_DEDUP=1`.
+    ///
+    /// Without this, the L2 SHA-256 cache (persisted in ~/.sqz/sessions.db,
+    /// surviving across sessions) returns a bare `§ref:HASH§` token the first
+    /// time an agent re-runs a command whose output it produced in an earlier
+    /// session — replacing the real output with an opaque 13-token reference
+    /// the agent can't read without a separate `sqz expand` round-trip. This
+    /// broke a live workflow: `mr_fetch.sh` output cached by a prior review
+    /// run came back as `§ref:…§` on the next run's very first call.
+    #[test]
+    fn test_process_hook_disables_dedup_for_agents() {
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"cat somefile.txt"}}"#;
+        let result = process_hook(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let cmd = parsed["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.contains("compress --no-cache --cmd"),
+            "rewrite must include --no-cache so no §ref§ token is emitted to the agent: {cmd}"
+        );
+    }
+
+    /// A command already wrapped with the new `compress --no-cache --cmd`
+    /// form must NOT be wrapped a second time — otherwise we regress the
+    /// runaway-prefix bug from issue #5 (the guard previously only matched
+    /// the older `compress --cmd` form).
+    #[test]
+    fn test_process_hook_skips_already_wrapped_no_cache_form() {
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"git status 2>&1 | /home/u/.cargo/bin/sqz compress --no-cache --cmd 'git status'"}}"#;
+        let result = process_hook(input).unwrap();
+        // Already-wrapped ⇒ passed through unchanged (no second rewrite).
+        assert_eq!(
+            result, input,
+            "already-wrapped --no-cache command must pass through unchanged"
         );
     }
 

@@ -178,7 +178,7 @@ const SqzPluginFactory = async (ctx: any) => {{
       const cmd = output.args?.command ?? "";
       if (!cmd || isAlreadyWrapped(cmd) || isInteractive(cmd) || hasHeredoc(cmd)) return;
 
-      // Rewrite: pipe through `sqz compress --cmd <base>`.
+      // Rewrite: pipe through `sqz compress --no-cache --cmd <base>`.
       //
       // Issue #10: the previous form was `SQZ_CMD=<base> <cmd> 2>&1 |
       // <sqz> compress`, which uses sh-specific inline env-var syntax.
@@ -188,10 +188,22 @@ const SqzPluginFactory = async (ctx: any) => {{
       // and producing zero compression. `--cmd NAME` is a normal CLI
       // argument, shell-neutral, works in POSIX sh, zsh, fish, PowerShell,
       // and cmd.exe.
+      //
+      // `--no-cache` disables the persistent SHA-256 dedup cache for this
+      // rewrite. This matches what every interactive shell hook already
+      // does via `export SQZ_NO_DEDUP=1` (see shell_hook.rs): dedup is
+      // "off by default because some models loop on refs they can't
+      // parse". Without it, an agent driving the bash tool receives an
+      // opaque `§ref:HASH§` token (from a prior session's L2 cache) in
+      // place of the real command output the moment any command's output
+      // repeats byte-for-byte — the agent then can't read the result
+      // without a separate `sqz expand` round-trip. The agent still gets
+      // per-command formatters, the compression pipeline, and n-gram
+      // abbreviation; only the lossy 13-token `§ref§` shortcut is skipped.
       const base = extractBaseCmd(cmd);
       const label = shellEscapeLabel(base);
       const body = needsSubshellWrap(cmd) ? `(${{cmd}})` : cmd;
-      output.args.command = `${{body}} 2>&1 | ${{SQZ_PATH}} compress --cmd ${{label}}`;
+      output.args.command = `${{body}} 2>&1 | ${{SQZ_PATH}} compress --no-cache --cmd ${{label}}`;
     }},
   }};
 }};
@@ -965,8 +977,13 @@ pub fn process_opencode_hook_with_cmd(input: &str, sqz_cmd: &str) -> Result<Stri
     } else {
         command.to_string()
     };
+    // `--no-cache` keeps this agent-driven rewrite consistent with the
+    // interactive shell hooks (which all `export SQZ_NO_DEDUP=1`): the
+    // persistent dedup cache is bypassed so the agent never receives an
+    // opaque `§ref:HASH§` token in place of real output when a command's
+    // output repeats. See the TS template above and shell_hook.rs.
     let rewritten = format!(
-        "{} 2>&1 | {} compress --cmd {}",
+        "{} 2>&1 | {} compress --no-cache --cmd {}",
         exec_command, sqz_cmd, escaped_base,
     );
 
@@ -1086,9 +1103,10 @@ mod tests {
              when it contains a compound/pipe/redirect operator; got:\n{content}"
         );
         assert!(
-            content.contains("`${body} 2>&1 | ${SQZ_PATH} compress --cmd ${label}`"),
+            content.contains("`${body} 2>&1 | ${SQZ_PATH} compress --no-cache --cmd ${label}`"),
             "plugin must build the final rewritten command from the (possibly \
-             subshell-wrapped) body, not the raw cmd; got:\n{content}"
+             subshell-wrapped) body, not the raw cmd, and must pass --no-cache \
+             so agents never get an opaque §ref§ token; got:\n{content}"
         );
     }
 
@@ -1226,6 +1244,11 @@ mod tests {
         assert!(
             cmd.contains("--cmd git"),
             "should pass base command via --cmd: {cmd}"
+        );
+        assert!(
+            cmd.contains("compress --no-cache --cmd"),
+            "OpenCode agent rewrites must pass --no-cache so the agent never \
+             receives an opaque §ref§ dedup token in place of real output: {cmd}"
         );
         assert!(
             !cmd.contains("SQZ_CMD="),
